@@ -1,0 +1,2644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rangebook — Herd Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #E4DBC2;
+    --bg-2: #DCD0AF;
+    --surface: #F7F2E4;
+    --surface-2: #EFE7D2;
+    --ink: #2A2318;
+    --ink-soft: #6B6046;
+    --ink-faint: #948A6C;
+    --line: #C7BA96;
+    --line-soft: #D8CDAC;
+    --rust: #A8481F;
+    --rust-dark: #7E3517;
+    --pasture: #4C6B3A;
+    --pasture-dark: #37501F;
+    --tag: #C97A2B;
+    --tag-dark: #965A1B;
+    --danger: #A5301E;
+    --danger-bg: #F0DDD3;
+    --pasture-bg: #DDE6D0;
+    --tag-bg: #F2E1C6;
+    --white: #FFFDF7;
+    --radius: 3px;
+    --shadow: 0 1px 0 rgba(42,35,24,0.06), 0 2px 8px rgba(42,35,24,0.06);
+    --shadow-lg: 0 8px 30px rgba(42,35,24,0.18);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    color:var(--ink);
+    font-family:'Public Sans', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--rust); color:var(--white);}
+  .mono{font-family:'JetBrains Mono', monospace;}
+  .slab{font-family:'Roboto Slab', serif;}
+
+  a, button{font-family:inherit;}
+  button{cursor:pointer;}
+
+  /* ---------- Ear tag signature element ---------- */
+  .eartag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    position:relative;
+    padding:3px 10px 3px 16px;
+    font-family:'JetBrains Mono', monospace;
+    font-weight:700;
+    font-size:12.5px;
+    letter-spacing:0.02em;
+    border-radius:2px 8px 8px 2px;
+    white-space:nowrap;
+    line-height:1.5;
+  }
+  .eartag::before{
+    content:"";
+    position:absolute;
+    left:5px; top:50%;
+    width:5px; height:5px;
+    border-radius:50%;
+    background:rgba(255,253,247,0.75);
+    transform:translateY(-50%);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
+  }
+  .eartag.cow{ background:var(--pasture); color:var(--white); }
+  .eartag.bull{ background:var(--rust); color:var(--white); }
+  .eartag.heifer{ background:#8A7A46; color:var(--white); }
+  .eartag.steer{ background:#6E6249; color:var(--white); }
+  .eartag.calf-bull, .eartag.calf-heifer{ background:var(--tag); color:var(--white); }
+  .eartag.sold, .eartag.deceased{ background:var(--ink-faint); color:var(--white); opacity:0.75; }
+
+  /* ---------- Layout ---------- */
+  #app{max-width:1180px; margin:0 auto; padding:0 20px 80px;}
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:26px 0 18px;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{
+    width:38px; height:38px;
+    border-radius:50%;
+    background:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .brand h1{
+    font-family:'Roboto Slab', serif;
+    font-weight:800;
+    font-size:22px;
+    margin:0;
+    letter-spacing:-0.01em;
+  }
+  .brand p{
+    margin:0; font-size:12px; color:var(--ink-soft); font-weight:500;
+    text-transform:uppercase; letter-spacing:0.09em;
+  }
+
+  .btn{
+    display:inline-flex; align-items:center; gap:7px;
+    border:1px solid transparent;
+    border-radius:var(--radius);
+    padding:10px 16px;
+    font-size:13.5px;
+    font-weight:600;
+    background:var(--ink);
+    color:var(--white);
+    transition:transform .12s ease, box-shadow .12s ease, background .15s ease;
+  }
+  .btn:hover{ transform:translateY(-1px); box-shadow:var(--shadow); }
+  .btn:active{ transform:translateY(0); }
+  .btn.rust{ background:var(--rust); }
+  .btn.rust:hover{ background:var(--rust-dark); }
+  .btn.ghost{
+    background:transparent; color:var(--ink); border-color:var(--line);
+  }
+  .btn.ghost:hover{ background:var(--surface-2); }
+  .btn.sm{ padding:6px 11px; font-size:12.5px; }
+  .btn.danger{ background:var(--danger); }
+  .btn:disabled{ opacity:0.45; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  .tabs{
+    display:flex; gap:4px; border-bottom:2px solid var(--line);
+    margin-bottom:26px; overflow-x:auto;
+  }
+  .tab{
+    padding:11px 16px 12px;
+    font-size:13.5px; font-weight:600;
+    color:var(--ink-soft);
+    border-bottom:2px solid transparent;
+    margin-bottom:-2px;
+    white-space:nowrap;
+    display:flex; align-items:center; gap:7px;
+    background:none; border-top:none; border-left:none; border-right:none;
+  }
+  .tab .count{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px; background:var(--surface-2);
+    color:var(--ink-soft); padding:1px 6px; border-radius:10px;
+  }
+  .tab.active{ color:var(--rust); border-bottom-color:var(--rust); }
+  .tab.active .count{ background:var(--rust); color:var(--white); }
+  .tab:hover:not(.active){ color:var(--ink); }
+
+  /* ---------- Cards / stat blocks ---------- */
+  .grid{ display:grid; gap:14px; }
+  .stat-grid{ grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); margin-bottom:26px; }
+  .stat-card{
+    background:var(--surface);
+    border:1px solid var(--line-soft);
+    border-radius:var(--radius);
+    padding:16px 18px;
+    box-shadow:var(--shadow);
+  }
+  .stat-card .num{
+    font-family:'Roboto Slab', serif; font-weight:800; font-size:30px; line-height:1;
+    color:var(--ink); margin-bottom:6px;
+  }
+  .stat-card .label{
+    font-size:11.5px; text-transform:uppercase; letter-spacing:0.08em;
+    color:var(--ink-soft); font-weight:600;
+  }
+  .stat-card.accent .num{ color:var(--rust); }
+
+  .panel{
+    background:var(--surface);
+    border:1px solid var(--line-soft);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:20px 22px;
+    margin-bottom:20px;
+  }
+  .panel h2{
+    font-family:'Roboto Slab', serif; font-size:16px; margin:0 0 3px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  .panel .sub{ font-size:12.5px; color:var(--ink-soft); margin:0 0 16px; }
+  .section-title{
+    font-family:'Roboto Slab', serif; font-weight:700; font-size:18px;
+    margin:0 0 4px;
+  }
+  .section-desc{ font-size:13px; color:var(--ink-soft); margin:0 0 18px; }
+
+  /* ---------- Table (ledger) ---------- */
+  .ledger{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  .ledger thead th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.07em;
+    color:var(--ink-soft); font-weight:700; padding:0 12px 10px; border-bottom:2px solid var(--line);
+  }
+  .ledger tbody td{
+    padding:11px 12px; border-bottom:1px solid var(--line-soft); vertical-align:middle;
+  }
+  .ledger tbody tr{ transition:background .1s ease; cursor:pointer; }
+  .ledger tbody tr:hover{ background:var(--surface-2); }
+  .ledger tbody tr:last-child td{ border-bottom:none; }
+  .muted{ color:var(--ink-faint); }
+  .num-cell{ font-family:'JetBrains Mono', monospace; }
+
+  /* ---------- Filters/toolbar ---------- */
+  .toolbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .search-input, select, input[type=text], input[type=number], input[type=date], textarea{
+    background:var(--white);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:9px 12px;
+    font-size:13.5px;
+    color:var(--ink);
+    font-family:inherit;
+  }
+  .search-input{ min-width:200px; flex:1; }
+  select{ appearance:none; padding-right:28px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236B6046'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 10px center;
+  }
+  input:focus, select:focus, textarea:focus{ outline:2px solid var(--rust); outline-offset:1px; border-color:var(--rust); }
+  .chip-toggle{ display:flex; gap:6px; flex-wrap:wrap; }
+  .chip{
+    padding:7px 13px; border-radius:20px; border:1px solid var(--line);
+    background:var(--surface); font-size:12.5px; font-weight:600; color:var(--ink-soft);
+  }
+  .chip.active{ background:var(--ink); color:var(--white); border-color:var(--ink); }
+
+  /* ---------- Pair cards ---------- */
+  .pair-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:14px; }
+  .pair-card{
+    background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--radius);
+    padding:16px 18px; box-shadow:var(--shadow);
+  }
+  .pair-card .cow-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .pair-card .cow-name{ font-weight:700; font-size:14px; }
+  .pair-link{
+    border-left:2px dashed var(--line); margin-left:9px; padding-left:16px;
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .calf-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .calf-meta{ font-size:11.5px; color:var(--ink-soft); }
+  .no-calf{ font-size:12.5px; color:var(--ink-faint); font-style:italic; padding-left:16px; }
+  .age-pill{
+    font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:10px;
+    text-transform:uppercase; letter-spacing:0.03em;
+  }
+  .age-pill.ok{ background:var(--pasture-bg); color:var(--pasture-dark); }
+  .age-pill.due{ background:var(--tag-bg); color:var(--tag-dark); }
+  .age-pill.overdue{ background:var(--danger-bg); color:var(--danger); }
+
+  /* ---------- Task list ---------- */
+  .task-list{ display:flex; flex-direction:column; }
+  .task-item{
+    display:flex; align-items:center; gap:12px; padding:11px 0;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .task-item:last-child{ border-bottom:none; }
+  .task-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .task-dot.overdue{ background:var(--danger); }
+  .task-dot.due{ background:var(--tag); }
+  .task-dot.ok{ background:var(--pasture); }
+  .task-body{ flex:1; min-width:0; }
+  .task-title{ font-size:13.5px; font-weight:600; }
+  .task-sub{ font-size:12px; color:var(--ink-soft); }
+  .task-when{ font-size:12px; font-weight:700; font-family:'JetBrains Mono',monospace; white-space:nowrap; }
+  .task-when.overdue{ color:var(--danger); }
+  .task-when.due{ color:var(--tag-dark); }
+  .task-when.ok{ color:var(--pasture-dark); }
+
+  .empty-state{
+    text-align:center; padding:50px 20px; color:var(--ink-soft);
+  }
+  .empty-state .icon{ font-size:34px; margin-bottom:10px; opacity:0.6; }
+  .empty-state h3{ font-family:'Roboto Slab',serif; font-size:16px; color:var(--ink); margin:0 0 6px;}
+  .empty-state p{ font-size:13px; margin:0 0 16px; }
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(24,20,12,0.5);
+    display:flex; align-items:flex-start; justify-content:center;
+    padding:40px 16px; overflow-y:auto; z-index:100;
+  }
+  .modal{
+    background:var(--surface); border-radius:6px; box-shadow:var(--shadow-lg);
+    width:100%; max-width:560px; padding:26px 26px 22px;
+    animation:modalIn .16s ease;
+  }
+  @keyframes modalIn{ from{ opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+  .modal-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .modal-head h3{ font-family:'Roboto Slab',serif; font-size:18px; margin:0; }
+  .modal-close{ background:none; border:none; font-size:20px; color:var(--ink-soft); line-height:1; padding:4px; }
+  .modal-close:hover{ color:var(--ink); }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:6px; }
+  .field input, .field select, .field textarea{ width:100%; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .field-row.three{ grid-template-columns:1fr 1fr 1fr; }
+  textarea{ resize:vertical; min-height:60px; font-family:inherit; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
+  .hint{ font-size:11.5px; color:var(--ink-faint); margin-top:4px; }
+
+  /* ---------- Detail drawer ---------- */
+  .drawer-backdrop{
+    position:fixed; inset:0; background:rgba(24,20,12,0.5); z-index:90;
+    display:flex; justify-content:flex-end;
+  }
+  .drawer{
+    background:var(--surface); width:100%; max-width:460px; height:100%;
+    overflow-y:auto; padding:26px 24px 40px; box-shadow:var(--shadow-lg);
+    animation:drawerIn .18s ease;
+  }
+  @keyframes drawerIn{ from{ transform:translateX(24px); opacity:0;} to{transform:translateX(0); opacity:1;} }
+  .drawer-head{ display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:4px; }
+  .drawer-title{ font-family:'Roboto Slab',serif; font-size:20px; font-weight:700; margin:10px 0 4px; }
+  .drawer-sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:20px; }
+  .kv-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; margin-bottom:20px; }
+  .kv{ }
+  .kv .k{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-faint); font-weight:700; margin-bottom:2px;}
+  .kv .v{ font-size:13.5px; font-weight:600; }
+  .drawer-section{ margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft); }
+  .drawer-section h4{ font-family:'Roboto Slab',serif; font-size:13.5px; margin:0 0 10px; display:flex; justify-content:space-between; align-items:center;}
+  .mini-row{ display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line-soft); font-size:12.5px; }
+  .mini-row:last-child{ border-bottom:none; }
+  .mini-row .t{ font-weight:700; }
+  .mini-row .d{ color:var(--ink-soft); font-family:'JetBrains Mono',monospace; font-size:11.5px; }
+
+  .badge-row{ display:flex; gap:6px; flex-wrap:wrap; margin-top:10px;}
+  .status-tag{
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
+    padding:3px 9px; border-radius:10px; background:var(--surface-2); color:var(--ink-soft);
+  }
+
+  @media (max-width:640px){
+    .kv-grid{ grid-template-columns:1fr; }
+    .field-row, .field-row.three{ grid-template-columns:1fr; }
+    .topbar{ padding-top:18px; }
+    .brand h1{ font-size:19px; }
+    .ledger thead{ display:none; }
+    .ledger, .ledger tbody, .ledger tr, .ledger td{ display:block; width:100%; }
+    .ledger tr{ padding:10px 4px; border-bottom:1px solid var(--line-soft); }
+    .ledger td{ border:none; padding:3px 8px; }
+  }
+
+  select[multiple]{
+    background-image:none; padding:6px 8px; height:auto;
+  }
+  select[multiple] option{ padding:5px 6px; border-radius:2px; }
+
+  .checkbox-list{
+    border:1px solid var(--line); border-radius:var(--radius); background:var(--white);
+    max-height:190px; overflow-y:auto; padding:4px;
+  }
+  .checkbox-row{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; font-size:13px;
+    border-radius:2px; cursor:pointer;
+  }
+  .checkbox-row:hover{ background:var(--surface-2); }
+  .checkbox-row input{ flex-shrink:0; }
+  .checkbox-row.disabled{ opacity:0.5; cursor:not-allowed; }
+  .checkbox-row.disabled:hover{ background:none; }
+
+  input[type=file]{
+    width:100%; font-size:12.5px; background:var(--white); border:1px dashed var(--line);
+    border-radius:var(--radius); padding:14px 12px; color:var(--ink-soft);
+  }
+  input[type=file]::file-selector-button{
+    background:var(--ink); color:var(--white); border:none; border-radius:var(--radius);
+    padding:7px 12px; font-size:12px; font-weight:600; margin-right:10px; cursor:pointer;
+  }
+  .import-table tbody tr{ cursor:default; }
+  .import-table tbody tr:hover{ background:none; }
+
+  .bulk-bar{
+    display:flex; align-items:center; gap:12px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius);
+    padding:10px 14px; margin-bottom:14px; font-size:13px; font-weight:600;
+  }
+  .bulk-bar span{ margin-right:auto; }
+
+  .pasture-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:14px; }
+  .pasture-card{
+    background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--radius);
+    padding:16px 18px; box-shadow:var(--shadow);
+  }
+  .pasture-photo{
+    width:calc(100% + 36px); margin:-16px -18px 12px; display:block;
+    height:130px; object-fit:cover; border-radius:var(--radius) var(--radius) 0 0;
+  }
+  .pasture-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:6px; }
+  .pasture-name{ font-family:'Roboto Slab', serif; font-weight:700; font-size:15px; }
+  .pasture-meta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .pasture-notes{ font-size:12.5px; color:var(--ink-soft); margin:6px 0 10px; }
+  .pasture-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+
+  .global-search-wrap{
+    position:relative; flex:1; min-width:200px; max-width:380px;
+  }
+  .global-search-results{
+    position:absolute; top:calc(100% + 6px); left:0; right:0;
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow-lg); max-height:320px; overflow-y:auto; z-index:60;
+  }
+  .global-search-row{
+    display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer;
+    font-size:13px; border-bottom:1px solid var(--line-soft);
+  }
+  .global-search-row:last-child{ border-bottom:none; }
+  .global-search-row:hover{ background:var(--surface-2); }
+  .global-search-row .gs-meta{ flex:1; min-width:0; color:var(--ink-soft); font-size:12px; }
+  .global-search-empty{ padding:14px; font-size:12.5px; color:var(--ink-soft); }
+
+  .icon-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:40px; height:40px; border-radius:50%;
+    border:1px solid var(--line); background:var(--surface); color:var(--ink);
+    transition:background .12s ease, transform .12s ease;
+    position:relative;
+  }
+  .icon-btn:hover{ background:var(--surface-2); transform:translateY(-1px); }
+  .icon-btn .drive-dot{
+    position:absolute; top:5px; right:5px;
+    width:8px; height:8px; border-radius:50%;
+    background:var(--ink-faint); border:1.5px solid var(--surface);
+  }
+  .icon-btn .drive-dot.connected{ background:var(--pasture); }
+  .icon-btn .drive-dot.error{ background:var(--danger); }
+
+  .hold-reset-btn{
+    position:relative; overflow:hidden; width:100%; padding:14px 16px;
+    border-radius:var(--radius); border:1px solid var(--danger);
+    background:var(--danger-bg); cursor:pointer; user-select:none; -webkit-user-select:none;
+    touch-action:none;
+  }
+  .hold-reset-fill{
+    position:absolute; left:0; top:0; bottom:0; width:0%;
+    background:var(--danger); z-index:0;
+  }
+  .hold-reset-label{
+    position:relative; z-index:1; font-weight:700; font-size:13.5px; color:var(--danger);
+  }
+  .hold-reset-btn.holding .hold-reset-label{ color:var(--white); }
+
+  #toast-wrap{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:200; display:flex; flex-direction:column; gap:8px; align-items:center;}
+  .toast{
+    background:var(--ink); color:var(--white); padding:10px 18px; border-radius:20px;
+    font-size:13px; font-weight:600; box-shadow:var(--shadow-lg); animation:toastIn .15s ease;
+  }
+  @keyframes toastIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M4 10c0-3 2.5-6 8-6s8 3 8 6c0 4-2 5-2 8 0 1.5-1 2-2 2H8c-1 0-2-.5-2-2 0-3-2-4-2-8z" fill="#F7F2E4"/>
+          <circle cx="9" cy="11" r="1.1" fill="#2A2318"/>
+          <circle cx="15" cy="11" r="1.1" fill="#2A2318"/>
+          <path d="M6 8l-2-3M18 8l2-3" stroke="#F7F2E4" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Rangebook</h1>
+        <p>Cow / Calf Herd Ledger</p>
+      </div>
+    </div>
+    <div class="global-search-wrap" id="global-search-wrap">
+      <input type="text" id="global-search-input" class="search-input" style="width:100%;" placeholder="Search animals by tag, name, or breed…" autocomplete="off" oninput="handleGlobalSearchInput(this.value)" onfocus="handleGlobalSearchInput(this.value)">
+      <div id="global-search-results" class="global-search-results" style="display:none;"></div>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="icon-btn" id="drive-btn" onclick="openDriveModal()" title="Google Drive sync" aria-label="Google Drive sync">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 15l4-7h10l4 7H3z"></path>
+          <path d="M7 15l3 5h4l3-5"></path>
+          <path d="M12 4l2.5 4"></path>
+        </svg>
+        <span class="drive-dot" id="drive-dot"></span>
+      </button>
+      <button class="icon-btn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <nav class="tabs" id="tabs"></nav>
+  <main id="view-root"></main>
+</div>
+
+<div id="modal-root"></div>
+<div id="drawer-root"></div>
+<div id="toast-wrap"></div>
+
+<script>
+/* =========================================================
+   STATE
+========================================================= */
+let state = { animals: [], events: [], breeding: [], pastures: [], breeds: [], vaccines: [] };
+let currentTab = 'dashboard';
+let animalFilters = { search:'', klass:'all', status:'active' };
+let selectedAnimalIds = new Set();
+let storageReady = false;
+
+const CLASSES = ['Cow','Bull','Heifer','Steer','Bull Calf','Heifer Calf'];
+const EVENT_TYPES = ['Vaccination','Treatment','Weight Check','Calving','Weaning','Pregnancy Check','Death / Loss','Sale','Purchase','Other'];
+const BREED_PALETTE = ['#A8481F','#4C6B3A','#C97A2B','#8A7A46','#6E6249','#37501F','#7E3517','#965A1B','#5B4636','#3C6E71','#7A4B8A','#B23A2E'];
+const GESTATION_DAYS = 283;
+const WEAN_TARGET_DAYS = 205;
+
+/* =========================================================
+   STORAGE
+========================================================= */
+const hasAppStorage = typeof window!=='undefined' && !!window.storage && typeof window.storage.get==='function';
+
+function loadDriveConfig(){
+  try{
+    const raw = localStorage.getItem('herd-drive-config');
+    return raw ? JSON.parse(raw) : { url:'', secret:'' };
+  }catch(e){ return { url:'', secret:'' }; }
+}
+function persistDriveConfig(cfg){
+  driveConfig = cfg;
+  try{ localStorage.setItem('herd-drive-config', JSON.stringify(cfg)); }catch(e){}
+}
+let driveConfig = loadDriveConfig();
+let driveStatus = 'idle'; // idle | connected | error | syncing
+let driveLastSync = null;
+
+async function driveFetchState(){
+  const sep = driveConfig.url.includes('?') ? '&' : '?';
+  const res = await fetch(driveConfig.url + sep + 'secret=' + encodeURIComponent(driveConfig.secret||''));
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const text = await res.text();
+  if(!text) return null;
+  const parsed = JSON.parse(text);
+  if(parsed && parsed.error) throw new Error(parsed.error);
+  return parsed;
+}
+async function driveSaveState(){
+  const res = await fetch(driveConfig.url, {
+    method:'POST',
+    headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: driveConfig.secret||'', data: JSON.stringify(state) })
+  });
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const text = await res.text();
+  const parsed = JSON.parse(text);
+  if(parsed && parsed.error) throw new Error(parsed.error);
+}
+function refreshDriveStatusUI(){
+  const dot = document.getElementById('drive-dot');
+  if(!dot) return;
+  dot.classList.remove('connected','error');
+  if(driveConfig && driveConfig.url){
+    if(driveStatus==='error') dot.classList.add('error');
+    else dot.classList.add('connected');
+  }
+}
+function applyLoadedState(parsed){
+  state.animals = parsed.animals || [];
+  state.events = parsed.events || [];
+  state.breeding = parsed.breeding || [];
+  state.pastures = parsed.pastures || [];
+  state.breeds = (parsed.breeds || []).map((b, idx)=>{
+    if(typeof b === 'string') return { name: b, color: BREED_PALETTE[idx % BREED_PALETTE.length] };
+    return { name: b.name, color: b.color || BREED_PALETTE[idx % BREED_PALETTE.length] };
+  });
+  state.vaccines = parsed.vaccines || [];
+}
+async function loadState(){
+  try{
+    if(driveConfig && driveConfig.url){
+      const parsed = await driveFetchState();
+      driveStatus = 'connected';
+      if(parsed) applyLoadedState(parsed);
+    } else if(hasAppStorage){
+      const res = await window.storage.get('herd-data', false);
+      if(res && res.value) applyLoadedState(JSON.parse(res.value));
+    } else {
+      const raw = localStorage.getItem('herd-data');
+      if(raw) applyLoadedState(JSON.parse(raw));
+    }
+  }catch(e){
+    if(driveConfig && driveConfig.url){
+      driveStatus = 'error';
+      toast("Couldn't reach Google Drive — showing the local copy");
+      try{
+        const raw = localStorage.getItem('herd-data');
+        if(raw) applyLoadedState(JSON.parse(raw));
+      }catch(e2){}
+    }
+  }
+  storageReady = true;
+  refreshDriveStatusUI();
+}
+let saveTimer = null;
+function saveState(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    const json = JSON.stringify(state);
+    try{ localStorage.setItem('herd-data', json); }catch(e){}
+    try{
+      if(driveConfig && driveConfig.url){
+        await driveSaveState();
+        driveStatus = 'connected';
+        driveLastSync = new Date();
+      } else if(hasAppStorage){
+        await window.storage.set('herd-data', json, false);
+      }
+    }catch(e){
+      if(driveConfig && driveConfig.url){
+        driveStatus = 'error';
+        toast('Could not sync to Google Drive — saved locally, will retry next change');
+      } else {
+        toast('Could not save — changes may be lost');
+      }
+    }
+    refreshDriveStatusUI();
+  }, 150);
+}
+
+function toast(msg){
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.remove(); }, 2600);
+}
+
+/* =========================================================
+   UTIL
+========================================================= */
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function fmtDate(d){
+  if(!d) return '—';
+  const dt = new Date(d + 'T00:00:00');
+  if(isNaN(dt)) return d;
+  return dt.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+function daysBetween(a,b){
+  const A = new Date(a+'T00:00:00'), B = new Date(b+'T00:00:00');
+  return Math.round((B-A)/86400000);
+}
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function addDays(dateStr, n){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.toISOString().slice(0,10);
+}
+function ageInDays(dob){ if(!dob) return null; return daysBetween(dob, todayStr()); }
+function ageLabel(dob){
+  const d = ageInDays(dob);
+  if(d===null) return '—';
+  if(d<0) return 'not born yet';
+  if(d<60) return d + 'd';
+  if(d<730) return Math.floor(d/30.4) + 'mo';
+  return (d/365.25).toFixed(1) + 'yr';
+}
+function animalById(id){ return state.animals.find(a=>a.id===id); }
+function animalByTag(tag){ return state.animals.find(a=>a.tagId===tag); }
+function eartagClass(a){
+  if(a.status==='sold') return 'sold';
+  if(a.status==='deceased') return 'deceased';
+  const map = { 'Cow':'cow','Bull':'bull','Heifer':'heifer','Steer':'steer','Bull Calf':'calf-bull','Heifer Calf':'calf-heifer' };
+  return map[a.klass] || 'cow';
+}
+function eartag(a){
+  return `<span class="eartag ${eartagClass(a)}">${escapeHtml(a.tagId||'—')}</span>`;
+}
+function escapeHtml(str){
+  if(str===undefined || str===null) return '';
+  return String(str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function latestWeight(a){
+  if(!a.weights || !a.weights.length) return null;
+  return [...a.weights].sort((x,y)=> x.date < y.date ? 1 : -1)[0];
+}
+function sireDisplay(b){
+  const parts = [];
+  if(b.sireTagIds && b.sireTagIds.length){
+    parts.push(b.sireTagIds.map(t=> eartag(animalByTag(t) || { tagId:t, klass:'Bull' })).join(' '));
+  }
+  if(b.sireOther){
+    parts.push(`<span class="muted" style="font-size:11.5px;">${escapeHtml(b.sireOther)}</span>`);
+  }
+  if(parts.length===0 && b.sireTagId){
+    parts.push(`<span class="mono">${escapeHtml(b.sireTagId)}</span>`);
+  }
+  return parts.length ? parts.join(' ') : '<span class="muted">—</span>';
+}
+function ensurePastureExists(name){
+  const n = (name||'').trim();
+  if(!n) return;
+  if(!state.pastures.some(p=>p.name.toLowerCase()===n.toLowerCase())){
+    state.pastures.push({ id: uid(), name: n, acres:'', notes:'' });
+  }
+}
+function pastureOptionsDatalist(id){
+  return `<datalist id="${id}">${state.pastures.map(p=>`<option value="${escapeHtml(p.name)}">`).join('')}</datalist>`;
+}
+function ensureBreedExists(name, color){
+  const n = (name||'').trim();
+  if(!n) return;
+  if(!state.breeds.some(b=>b.name.toLowerCase()===n.toLowerCase())){
+    state.breeds.push({ name: n, color: color || BREED_PALETTE[state.breeds.length % BREED_PALETTE.length] });
+  }
+}
+function breedColor(name){
+  if(!name) return 'var(--ink-faint)';
+  const entry = state.breeds.find(b=>b.name.toLowerCase()===String(name).toLowerCase());
+  return entry ? entry.color : 'var(--ink-faint)';
+}
+function breedBadge(name){
+  if(!name) return '<span class="muted">—</span>';
+  return `<span style="display:inline-flex; align-items:center; gap:5px;"><span style="width:9px; height:9px; border-radius:50%; background:${breedColor(name)}; display:inline-block; flex-shrink:0;"></span>${escapeHtml(name)}</span>`;
+}
+function breedOptionsHtml(selected){
+  const names = state.breeds.map(b=>b.name);
+  if(selected && !names.some(n=>n.toLowerCase()===selected.toLowerCase())) names.push(selected);
+  names.sort((a,b)=>a.localeCompare(b));
+  let html = `<option value="">— Select breed —</option>`;
+  names.forEach(n=>{
+    html += `<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`;
+  });
+  html += `<option value="__add_new__">+ Add new breed…</option>`;
+  return html;
+}
+function handleBreedSelectChange(selectEl){
+  if(selectEl.value === '__add_new__'){
+    const name = (prompt('Add a new breed (e.g. Angus, Hereford, Simmental):') || '').trim();
+    if(name){
+      ensureBreedExists(name);
+      saveState();
+      selectEl.innerHTML = breedOptionsHtml(name);
+      selectEl.dataset.prev = name;
+    } else {
+      selectEl.value = selectEl.dataset.prev || '';
+    }
+  } else {
+    selectEl.dataset.prev = selectEl.value;
+  }
+  const dot = document.getElementById('breed-color-dot');
+  if(dot) dot.style.background = breedColor(selectEl.value);
+}
+let breedChipCache = [];
+function renderBreedChips(){
+  breedChipCache = state.breeds.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(breedChipCache.length===0) return `<p class="hint" style="margin:0;">No breeds added yet.</p>`;
+  return `<div class="chip-toggle">${breedChipCache.map((breed, idx)=>
+    `<span class="chip" style="display:inline-flex; align-items:center; gap:7px;">
+      <input type="color" value="${breed.color}" title="Change color" onchange="updateBreedColor(${idx}, this.value)" style="width:16px; height:16px; padding:0; border:none; border-radius:50%; cursor:pointer; overflow:hidden;">
+      ${escapeHtml(breed.name)}
+      <button type="button" onclick="removeBreedByIndex(${idx})" style="background:none; border:none; color:inherit; cursor:pointer; font-weight:700; padding:0 2px; line-height:1; font-size:14px;">×</button>
+    </span>`
+  ).join('')}</div>`;
+}
+function refreshBreedChipList(){
+  const el = document.getElementById('breed-chip-list');
+  if(el) el.innerHTML = renderBreedChips();
+}
+function addBreedFromSettings(){
+  const input = document.getElementById('new-breed-input');
+  const colorInput = document.getElementById('new-breed-color');
+  if(!input) return;
+  const name = input.value.trim();
+  if(!name){ toast('Enter a breed name'); return; }
+  if(state.breeds.some(b=>b.name.toLowerCase()===name.toLowerCase())){ toast('That breed is already in the library'); input.value=''; return; }
+  const color = (colorInput && colorInput.value) || BREED_PALETTE[state.breeds.length % BREED_PALETTE.length];
+  state.breeds.push({ name, color });
+  saveState();
+  input.value = '';
+  if(colorInput) colorInput.value = BREED_PALETTE[state.breeds.length % BREED_PALETTE.length];
+  refreshBreedChipList();
+  toast('Breed added');
+}
+function updateBreedColor(idx, color){
+  const breed = breedChipCache[idx];
+  if(!breed) return;
+  const entry = state.breeds.find(b=>b.name===breed.name);
+  if(entry){ entry.color = color; saveState(); }
+}
+function removeBreedByIndex(idx){
+  const breed = breedChipCache[idx];
+  if(!breed) return;
+  if(!confirm(`Remove "${breed.name}" from the breed library? Animals already set to this breed keep it — it just won't show up in the dropdown anymore.`)) return;
+  state.breeds = state.breeds.filter(b=>b.name!==breed.name);
+  saveState();
+  refreshBreedChipList();
+  toast('Breed removed');
+}
+
+/* ---------- Vaccine library ---------- */
+function ensureVaccineExists(name){
+  const n = (name||'').trim();
+  if(!n) return;
+  if(!state.vaccines.some(v=>v.toLowerCase()===n.toLowerCase())){
+    state.vaccines.push(n);
+  }
+}
+function vaccineOptionsHtml(selected){
+  const names = state.vaccines.slice();
+  if(selected && !names.some(n=>n.toLowerCase()===selected.toLowerCase())) names.push(selected);
+  names.sort((a,b)=>a.localeCompare(b));
+  let html = `<option value="">— Select vaccine —</option>`;
+  names.forEach(n=>{
+    html += `<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`;
+  });
+  html += `<option value="__add_new__">+ Add new vaccine…</option>`;
+  return html;
+}
+function handleVaccineSelectChange(selectEl){
+  if(selectEl.value === '__add_new__'){
+    const name = (prompt('Add a new vaccine (e.g. Bovi-Shield Gold, 7-way Blackleg):') || '').trim();
+    if(name){
+      ensureVaccineExists(name);
+      saveState();
+      selectEl.innerHTML = vaccineOptionsHtml(name);
+      selectEl.dataset.prev = name;
+    } else {
+      selectEl.value = selectEl.dataset.prev || '';
+    }
+  } else {
+    selectEl.dataset.prev = selectEl.value;
+  }
+}
+let vaccineChipCache = [];
+function renderVaccineChips(){
+  vaccineChipCache = state.vaccines.slice().sort((a,b)=>a.localeCompare(b));
+  if(vaccineChipCache.length===0) return `<p class="hint" style="margin:0;">No vaccines added yet.</p>`;
+  return `<div class="chip-toggle">${vaccineChipCache.map((name, idx)=>
+    `<span class="chip" style="display:inline-flex; align-items:center; gap:6px;">${escapeHtml(name)} <button type="button" onclick="removeVaccineByIndex(${idx})" style="background:none; border:none; color:inherit; cursor:pointer; font-weight:700; padding:0 2px; line-height:1; font-size:14px;">×</button></span>`
+  ).join('')}</div>`;
+}
+function refreshVaccineChipList(){
+  const el = document.getElementById('vaccine-chip-list');
+  if(el) el.innerHTML = renderVaccineChips();
+}
+function addVaccineFromSettings(){
+  const input = document.getElementById('new-vaccine-input');
+  if(!input) return;
+  const name = input.value.trim();
+  if(!name){ toast('Enter a vaccine name'); return; }
+  if(state.vaccines.some(v=>v.toLowerCase()===name.toLowerCase())){ toast('That vaccine is already in the library'); input.value=''; return; }
+  state.vaccines.push(name);
+  saveState();
+  input.value = '';
+  refreshVaccineChipList();
+  toast('Vaccine added');
+}
+function removeVaccineByIndex(idx){
+  const name = vaccineChipCache[idx];
+  if(!name) return;
+  if(!confirm(`Remove "${name}" from the vaccine library? Past events keep the record — it just won't show up in the dropdown anymore.`)) return;
+  state.vaccines = state.vaccines.filter(v=>v!==name);
+  saveState();
+  refreshVaccineChipList();
+  toast('Vaccine removed');
+}
+
+function getFilteredAnimals(){
+  let list = state.animals.filter(a=>{
+    if(animalFilters.status!=='all' && a.status!==animalFilters.status) return false;
+    if(animalFilters.klass!=='all' && a.klass!==animalFilters.klass) return false;
+    if(animalFilters.search){
+      const s = animalFilters.search.toLowerCase();
+      if(!(a.tagId||'').toLowerCase().includes(s) && !(a.name||'').toLowerCase().includes(s) && !(a.breed||'').toLowerCase().includes(s)) return false;
+    }
+    return true;
+  });
+  list.sort((a,b)=> (a.tagId||'').localeCompare(b.tagId||''));
+  return list;
+}
+function getPastureGroups(){
+  const active = state.animals.filter(a=>a.status==='active');
+  const map = {};
+  active.forEach(a=>{
+    const key = (a.pasture||'').trim();
+    if(!key) return;
+    if(!map[key]) map[key]=[];
+    map[key].push(a);
+  });
+  state.pastures.forEach(p=>{ if(!map[p.name]) map[p.name]=[]; });
+  return map;
+}
+function unassignedAnimals(){
+  return state.animals.filter(a=>a.status==='active' && !(a.pasture||'').trim());
+}
+
+/* =========================================================
+   TABS
+========================================================= */
+const TABS = [
+  { id:'dashboard', label:'Dashboard' },
+  { id:'animals', label:'Animals' },
+  { id:'pairs', label:'Pairs' },
+  { id:'pastures', label:'Pastures' },
+  { id:'health', label:'Health' },
+  { id:'breeding', label:'Breeding' },
+];
+function renderTabs(){
+  const el = document.getElementById('tabs');
+  el.innerHTML = TABS.map(t=>{
+    let count = '';
+    if(t.id==='animals') count = state.animals.filter(a=>a.status==='active').length;
+    if(t.id==='pairs') count = state.animals.filter(a=>a.klass==='Cow' && a.status==='active').length;
+    if(t.id==='pastures') count = state.pastures.length;
+    if(t.id==='health') count = state.events.length;
+    if(t.id==='breeding') count = state.breeding.length;
+    return `<button class="tab ${currentTab===t.id?'active':''}" onclick="setTab('${t.id}')">
+      ${t.label} ${count!==''? `<span class="count">${count}</span>`:''}
+    </button>`;
+  }).join('');
+}
+function setTab(id){ if(id!=='animals') selectedAnimalIds.clear(); currentTab = id; render(); }
+
+/* =========================================================
+   MAIN RENDER DISPATCH
+========================================================= */
+function render(){
+  const active = document.activeElement;
+  let focusInfo = null;
+  if(active && active.id && (active.tagName==='INPUT' || active.tagName==='TEXTAREA') && document.getElementById('view-root').contains(active)){
+    focusInfo = { id: active.id, start: active.selectionStart, end: active.selectionEnd };
+  }
+  renderTabs();
+  const root = document.getElementById('view-root');
+  if(!storageReady){ root.innerHTML = `<div class="empty-state"><p>Loading herd data…</p></div>`; return; }
+  if(currentTab==='dashboard') root.innerHTML = viewDashboard();
+  else if(currentTab==='animals') root.innerHTML = viewAnimals();
+  else if(currentTab==='pairs') root.innerHTML = viewPairs();
+  else if(currentTab==='pastures') root.innerHTML = viewPastures();
+  else if(currentTab==='health') root.innerHTML = viewHealth();
+  else if(currentTab==='breeding') root.innerHTML = viewBreeding();
+  if(focusInfo){
+    const el = document.getElementById(focusInfo.id);
+    if(el){
+      el.focus();
+      if(typeof focusInfo.start === 'number' && el.setSelectionRange){
+        try{ el.setSelectionRange(focusInfo.start, focusInfo.end); }catch(e){}
+      }
+    }
+  }
+}
+
+/* =========================================================
+   DASHBOARD
+========================================================= */
+function getUpcomingTasks(){
+  const tasks = [];
+  const today = todayStr();
+
+  // health events with a next-due date
+  state.events.forEach(ev=>{
+    if(ev.nextDue){
+      const a = animalById(ev.animalId);
+      if(!a || a.status!=='active') return;
+      const days = daysBetween(today, ev.nextDue);
+      tasks.push({
+        title: `${ev.type} due — ${a.tagId}`,
+        sub: a.klass + (ev.notes ? ' · '+ev.notes : ''),
+        date: ev.nextDue,
+        days
+      });
+    }
+  });
+
+  // weaning window for calves
+  state.animals.filter(a=> (a.klass==='Bull Calf' || a.klass==='Heifer Calf') && a.status==='active' && !a.weanDate).forEach(a=>{
+    const age = ageInDays(a.dob);
+    if(age===null) return;
+    const daysToTarget = WEAN_TARGET_DAYS - age;
+    tasks.push({
+      title: `Wean ${a.tagId}`,
+      sub: `Calf is ${ageLabel(a.dob)} old`,
+      date: addDays(today, daysToTarget),
+      days: daysToTarget
+    });
+  });
+
+  // expected calvings
+  state.breeding.filter(b=> b.result!=='Open' && !b.actualCalvingDate).forEach(b=>{
+    const cow = animalByTag(b.cowTagId);
+    if(!cow || cow.status!=='active') return;
+    const days = daysBetween(today, b.expectedCalvingDate);
+    tasks.push({
+      title: `Expected calving — ${b.cowTagId}`,
+      sub: cow.name ? cow.name : 'Cow',
+      date: b.expectedCalvingDate,
+      days
+    });
+  });
+
+  tasks.sort((a,b)=> a.days - b.days);
+  return tasks;
+}
+
+function taskUrgency(days){
+  if(days<0) return 'overdue';
+  if(days<=14) return 'due';
+  return 'ok';
+}
+
+function viewDashboard(){
+  const active = state.animals.filter(a=>a.status==='active');
+  const cows = active.filter(a=>a.klass==='Cow').length;
+  const bulls = active.filter(a=>a.klass==='Bull').length;
+  const heifers = active.filter(a=>a.klass==='Heifer').length;
+  const calves = active.filter(a=>a.klass==='Bull Calf' || a.klass==='Heifer Calf').length;
+  const pairsCount = active.filter(a=>a.klass==='Cow').filter(cow => active.some(c=>c.damId===cow.tagId)).length;
+
+  const tasks = getUpcomingTasks().slice(0,8);
+  const overdueCount = getUpcomingTasks().filter(t=>t.days<0).length;
+
+  const recentEvents = [...state.events].sort((a,b)=> a.date<b.date?1:-1).slice(0,6);
+
+  return `
+    <div class="grid stat-grid">
+      <div class="stat-card"><div class="num">${active.length}</div><div class="label">Head total</div></div>
+      <div class="stat-card"><div class="num">${cows}</div><div class="label">Cows</div></div>
+      <div class="stat-card"><div class="num">${calves}</div><div class="label">Calves at side</div></div>
+      <div class="stat-card"><div class="num">${heifers}</div><div class="label">Heifers</div></div>
+      <div class="stat-card"><div class="num">${bulls}</div><div class="label">Bulls</div></div>
+      <div class="stat-card ${overdueCount>0?'accent':''}"><div class="num">${overdueCount}</div><div class="label">Overdue tasks</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>Upcoming &amp; overdue <button class="btn ghost sm" onclick="setTab('health')">Log an event</button></h2>
+      <p class="sub">Vaccination and treatment follow-ups, weaning windows, and expected calving dates.</p>
+      ${tasks.length===0 ? `<div class="empty-state"><div class="icon">📋</div><h3>Nothing on the books</h3><p>Add breeding, health, or calf records to see reminders here.</p></div>` :
+      `<div class="task-list">
+        ${tasks.map(t=>{
+          const urg = taskUrgency(t.days);
+          const when = t.days<0 ? `${Math.abs(t.days)}d overdue` : t.days===0 ? 'today' : `in ${t.days}d`;
+          return `<div class="task-item">
+            <div class="task-dot ${urg}"></div>
+            <div class="task-body">
+              <div class="task-title">${escapeHtml(t.title)}</div>
+              <div class="task-sub">${escapeHtml(t.sub)} · ${fmtDate(t.date)}</div>
+            </div>
+            <div class="task-when ${urg}">${when}</div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+
+    <div class="panel">
+      <h2>Recent activity</h2>
+      <p class="sub">Latest entries across the herd.</p>
+      ${recentEvents.length===0 ? `<div class="empty-state"><div class="icon">🐄</div><h3>No records yet</h3><p>Health events and updates will show up here.</p></div>` :
+      `<div class="task-list">
+        ${recentEvents.map(ev=>{
+          const a = animalById(ev.animalId);
+          return `<div class="task-item">
+            <div class="task-dot ok"></div>
+            <div class="task-body">
+              <div class="task-title">${escapeHtml(ev.type)} — ${a? a.tagId : 'Unknown'}</div>
+              <div class="task-sub">${escapeHtml(ev.notes||'')}</div>
+            </div>
+            <div class="task-when ok">${fmtDate(ev.date)}</div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+  `;
+}
+
+/* =========================================================
+   ANIMALS
+========================================================= */
+function viewAnimals(){
+  const list = getFilteredAnimals();
+  const allSelected = list.length>0 && list.every(a=>selectedAnimalIds.has(a.id));
+
+  return `
+    <div class="toolbar">
+      <input id="animal-search-input" class="search-input" type="text" placeholder="Search tag, name, or breed…" value="${escapeHtml(animalFilters.search)}" oninput="animalFilters.search=this.value; render();">
+      <select onchange="animalFilters.klass=this.value; render();">
+        <option value="all" ${animalFilters.klass==='all'?'selected':''}>All classes</option>
+        ${CLASSES.map(c=>`<option value="${c}" ${animalFilters.klass===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <div class="chip-toggle">
+        <button class="chip ${animalFilters.status==='active'?'active':''}" onclick="animalFilters.status='active'; render();">Active</button>
+        <button class="chip ${animalFilters.status==='sold'?'active':''}" onclick="animalFilters.status='sold'; render();">Sold</button>
+        <button class="chip ${animalFilters.status==='deceased'?'active':''}" onclick="animalFilters.status='deceased'; render();">Deceased</button>
+        <button class="chip ${animalFilters.status==='all'?'active':''}" onclick="animalFilters.status='all'; render();">All</button>
+      </div>
+    </div>
+    ${selectedAnimalIds.size>0 ? `<div class="bulk-bar">
+      <span>${selectedAnimalIds.size} selected</span>
+      <button class="btn rust sm" onclick="openBulkMoveModal()">Move to pasture</button>
+      <button class="btn ghost sm" onclick="clearSelection()">Clear</button>
+    </div>` : ''}
+    ${list.length===0 ? `<div class="empty-state"><div class="icon">🏷️</div><h3>No animals match</h3><p>Try a different filter, or add your first animal.</p><button class="btn rust" onclick="openAnimalModal()">+ Add animal</button></div>` :
+    `<div class="panel" style="padding:6px 22px 10px;">
+      <table class="ledger">
+        <thead><tr>
+          <th style="width:28px;"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAll(this.checked)"></th>
+          <th>Tag</th><th>Yr</th><th>Class</th><th>Breed</th><th>DOB</th><th>Age</th><th>Dam</th><th>Pasture</th><th>Weight</th>${animalFilters.status==='sold' ? '<th>Price</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${list.map(a=>{
+            const w = latestWeight(a);
+            return `<tr onclick="openDrawer('${a.id}')">
+              <td onclick="event.stopPropagation()"><input type="checkbox" ${selectedAnimalIds.has(a.id)?'checked':''} onchange="toggleAnimalSelect('${a.id}', this.checked)"></td>
+              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.name? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(a.name)}</div>`:''}</div></div></td>
+              <td class="num-cell">${a.yearLetter? escapeHtml(a.yearLetter) : '<span class="muted">—</span>'}</td>
+              <td>${a.klass}</td>
+              <td>${breedBadge(a.breed)}</td>
+              <td class="num-cell">${fmtDate(a.dob)}</td>
+              <td class="num-cell">${ageLabel(a.dob)}</td>
+              <td>${a.damId ? eartag(animalByTag(a.damId)||{tagId:a.damId,klass:'Cow'}) : '<span class="muted">—</span>'}</td>
+              <td>${escapeHtml(a.pasture)||'<span class="muted">—</span>'}</td>
+              <td class="num-cell">${w? w.lbs+' lb' : '<span class="muted">—</span>'}</td>
+              ${animalFilters.status==='sold' ? `<td class="num-cell">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString() : '<span class="muted">—</span>'}</td>` : ''}
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  `;
+}
+
+/* =========================================================
+   PAIRS
+========================================================= */
+function viewPairs(){
+  const cows = state.animals.filter(a=>a.klass==='Cow' && a.status==='active').sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  if(cows.length===0){
+    return `<div class="empty-state"><div class="icon">🐮</div><h3>No cows on file yet</h3><p>Add a cow to start tracking pairs.</p><button class="btn rust" onclick="openAnimalModal('Cow')">+ Add a cow</button></div>`;
+  }
+  return `
+    <div class="section-title">Cow / calf pairs</div>
+    <p class="section-desc">Each cow with her calf(ves) currently at side. Weaning windows target ${WEAN_TARGET_DAYS} days.</p>
+    <div class="pair-grid">
+      ${cows.map(cow=>{
+        const calves = state.animals.filter(c=> c.damId===cow.tagId && c.status==='active' && !c.weanDate);
+        const w = latestWeight(cow);
+        return `<div class="pair-card">
+          <div class="cow-row">
+            <div>
+              ${eartag(cow)}
+              ${cow.name? `<span class="cow-name" style="margin-left:6px;">${escapeHtml(cow.name)}</span>`:''}
+            </div>
+            <button class="btn ghost sm" onclick="openDrawer('${cow.id}')">Details</button>
+          </div>
+          ${calves.length===0 ? `<div class="no-calf">No calf currently paired</div>` :
+          `<div class="pair-link">
+            ${calves.map(calf=>{
+              const age = ageInDays(calf.dob);
+              const diff = WEAN_TARGET_DAYS - age;
+              const urg = diff<0? 'overdue' : diff<=21 ? 'due' : 'ok';
+              const label = diff<0 ? `${Math.abs(diff)}d past target` : diff<=21 ? `wean in ${diff}d` : `${diff}d to target`;
+              return `<div class="calf-row">
+                <div>
+                  ${eartag(calf)}
+                  <div class="calf-meta">${ageLabel(calf.dob)} old · born ${fmtDate(calf.dob)}</div>
+                </div>
+                <span class="age-pill ${urg}">${label}</span>
+              </div>`;
+            }).join('')}
+          </div>`}
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+/* =========================================================
+   SELECTION (bulk pasture moves)
+========================================================= */
+function toggleAnimalSelect(id, checked){
+  if(checked) selectedAnimalIds.add(id); else selectedAnimalIds.delete(id);
+  render();
+}
+function toggleSelectAll(checked){
+  const list = getFilteredAnimals();
+  list.forEach(a=>{ if(checked) selectedAnimalIds.add(a.id); else selectedAnimalIds.delete(a.id); });
+  render();
+}
+function clearSelection(){ selectedAnimalIds.clear(); render(); }
+function openBulkMoveModal(){
+  const ids = Array.from(selectedAnimalIds);
+  if(ids.length===0){ toast('Select at least one animal'); return; }
+  openMoveModal(`Moving ${ids.length} selected animal${ids.length===1?'':'s'}.`, ids);
+}
+
+/* =========================================================
+   PASTURES
+========================================================= */
+let pastureGroupNamesCache = [];
+function viewPastures(){
+  const groups = getPastureGroups();
+  const names = Object.keys(groups).sort((a,b)=>a.localeCompare(b));
+  pastureGroupNamesCache = names;
+  const unassigned = unassignedAnimals();
+
+  return `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;">Pasture library</div>
+      <div style="flex:1;"></div>
+      <button class="btn rust" onclick="openPastureModal()">+ Add pasture</button>
+    </div>
+    <p class="section-desc">Keep a running list of your pastures and paddocks, and move whole groups of animals between them in one step.</p>
+    ${names.length===0 && unassigned.length===0 ? `<div class="empty-state"><div class="icon">🌾</div><h3>No pastures yet</h3><p>Add your first pasture to start tracking where the herd is grazing.</p><button class="btn rust" onclick="openPastureModal()">+ Add pasture</button></div>` :
+    `<div class="pasture-grid">
+      ${names.map((name, idx)=>{
+        const animals = groups[name];
+        const lib = state.pastures.find(p=>p.name===name);
+        return `<div class="pasture-card">
+          ${lib && lib.photo ? `<img src="${lib.photo}" alt="${escapeHtml(name)}" class="pasture-photo">` : ''}
+          <div class="pasture-head">
+            <div>
+              <div class="pasture-name">${escapeHtml(name)}</div>
+              <div class="pasture-meta">${animals.length} head${lib && lib.acres? ' · '+escapeHtml(lib.acres)+' ac':''}</div>
+            </div>
+            ${lib ? `<button class="btn ghost sm" onclick="openPastureModal('${lib.id}')">Edit</button>` : `<button class="btn ghost sm" onclick="addPastureFromGroup(${idx})">Add to library</button>`}
+          </div>
+          ${lib && lib.notes ? `<p class="pasture-notes">${escapeHtml(lib.notes)}</p>` : ''}
+          <div class="pasture-tags">
+            ${animals.slice(0,14).map(a=>eartag(a)).join('')}
+            ${animals.length>14 ? `<span class="status-tag">+${animals.length-14} more</span>` : ''}
+            ${animals.length===0 ? `<span class="muted" style="font-size:12.5px;">No animals currently assigned</span>` : ''}
+          </div>
+          <div class="modal-actions" style="justify-content:flex-start; padding:0; margin-top:14px;">
+            <button class="btn ghost sm" ${animals.length===0?'disabled':''} onclick="openGroupMoveModal(${idx})">Move group</button>
+            ${lib ? `<button class="btn ghost sm" style="color:var(--danger);" onclick="deletePasture('${lib.id}')">Delete</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+      ${unassigned.length>0 ? `<div class="pasture-card">
+        <div class="pasture-head">
+          <div>
+            <div class="pasture-name">Unassigned</div>
+            <div class="pasture-meta">${unassigned.length} head with no pasture set</div>
+          </div>
+        </div>
+        <div class="pasture-tags">
+          ${unassigned.slice(0,14).map(a=>eartag(a)).join('')}
+          ${unassigned.length>14 ? `<span class="status-tag">+${unassigned.length-14} more</span>` : ''}
+        </div>
+        <div class="modal-actions" style="justify-content:flex-start; padding:0; margin-top:14px;">
+          <button class="btn ghost sm" onclick="openUnassignedMoveModal()">Move group</button>
+        </div>
+      </div>` : ''}
+    </div>`}
+  `;
+}
+
+function addPastureFromGroup(idx){
+  const name = pastureGroupNamesCache[idx];
+  ensurePastureExists(name);
+  saveState();
+  render();
+  toast('Added to pasture library');
+}
+
+let pastureFormPhoto = null;
+function renderPastureModalPhotoBlock(){
+  if(pastureFormPhoto){
+    return `<img src="${pastureFormPhoto}" alt="Pasture photo" style="width:100%;max-height:160px;object-fit:cover;border-radius:4px;margin-bottom:8px;border:1px solid var(--line-soft);">
+      <button type="button" class="btn ghost sm" onclick="removePastureFormPhoto()">Remove photo</button>`;
+  }
+  return `<p class="hint" style="margin:0 0 8px;">No photo yet.</p>`;
+}
+function openPastureModal(editId){
+  const editing = editId ? state.pastures.find(p=>p.id===editId) : null;
+  const p = editing || { id:uid(), name:'', acres:'', notes:'', photo:null };
+  pastureFormPhoto = p.photo || null;
+  const body = `
+    <form onsubmit="savePasture(event, '${p.id}', ${editing?'true':'false'})">
+      <div class="field-row">
+        <div class="field"><label>Pasture name *</label><input type="text" name="name" required value="${escapeHtml(p.name)}" placeholder="e.g. North 40"></div>
+        <div class="field"><label>Acres</label><input type="number" min="0" step="0.1" name="acres" value="${escapeHtml(p.acres)}" placeholder="e.g. 40"></div>
+      </div>
+      <div class="field">
+        <label>Photo</label>
+        <div id="pasture-photo-block">${renderPastureModalPhotoBlock()}</div>
+        <input type="file" accept="image/*" onchange="handlePastureFileChange(event)">
+        <p class="hint">Optional — a quick reference shot of the gate, water source, or layout. Resized automatically.</p>
+      </div>
+      <div class="field"><label>Notes</label><textarea name="notes" placeholder="Water source, fence condition, grazing plan…">${escapeHtml(p.notes)}</textarea></div>
+      <div class="modal-actions">
+        ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deletePasture('${p.id}')">Delete</button>`:''}
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn rust">${editing?'Save changes':'Add pasture'}</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell(editing?'Edit pasture':'Add pasture', body);
+}
+function resizeImageFile(file, maxDim, quality){
+  maxDim = maxDim || 640;
+  quality = quality || 0.72;
+  return new Promise((resolve, reject)=>{
+    if(!file || !file.type || !file.type.startsWith('image/')){ reject(new Error('not an image')); return; }
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const img = new Image();
+      img.onload = function(){
+        let w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w >= h){ h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = ()=>reject(new Error('bad image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = ()=>reject(new Error('read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+function handlePastureFileChange(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  resizeImageFile(file).then(dataUrl=>{
+    pastureFormPhoto = dataUrl;
+    const block = document.getElementById('pasture-photo-block');
+    if(block) block.innerHTML = renderPastureModalPhotoBlock();
+  }).catch(()=>{
+    toast("Couldn't read that photo — try a JPG or PNG");
+  });
+}
+function removePastureFormPhoto(){
+  pastureFormPhoto = null;
+  const block = document.getElementById('pasture-photo-block');
+  if(block) block.innerHTML = renderPastureModalPhotoBlock();
+}
+function savePasture(evt, id, editing){
+  evt.preventDefault();
+  const f = evt.target;
+  const name = f.name.value.trim();
+  const acres = f.acres.value.trim();
+  const notes = f.notes.value.trim();
+  const photo = pastureFormPhoto;
+  if(!editing && state.pastures.some(p=>p.name.toLowerCase()===name.toLowerCase())){
+    toast('A pasture with that name already exists');
+    return;
+  }
+  if(editing){
+    const idx = state.pastures.findIndex(p=>p.id===id);
+    const oldName = state.pastures[idx].name;
+    state.pastures[idx] = { ...state.pastures[idx], name, acres, notes, photo };
+    if(oldName !== name){
+      state.animals.forEach(a=>{ if((a.pasture||'').trim()===oldName) a.pasture = name; });
+    }
+  } else {
+    state.pastures.push({ id, name, acres, notes, photo });
+  }
+  saveState();
+  closeModal();
+  render();
+  toast(editing? 'Pasture updated' : 'Pasture added');
+}
+function deletePasture(id){
+  const p = state.pastures.find(x=>x.id===id);
+  if(!p) return;
+  const affected = state.animals.filter(a=>a.status==='active' && (a.pasture||'').trim()===p.name).length;
+  const msg = affected>0
+    ? `Delete "${p.name}"? ${affected} animal${affected===1?'':'s'} currently assigned here will become unassigned.`
+    : `Delete "${p.name}"?`;
+  if(!confirm(msg)) return;
+  state.animals.forEach(a=>{ if((a.pasture||'').trim()===p.name) a.pasture=''; });
+  state.pastures = state.pastures.filter(x=>x.id!==id);
+  saveState();
+  closeModal();
+  render();
+  toast('Pasture deleted');
+}
+
+/* ---------- Move group / bulk move modal ---------- */
+let moveModalIds = [];
+function openGroupMoveModal(idx){
+  const name = pastureGroupNamesCache[idx];
+  const animals = state.animals.filter(a=>a.status==='active' && (a.pasture||'').trim()===name);
+  if(animals.length===0){ toast('No animals in this group'); return; }
+  openMoveModal(`Moving ${animals.length} animal${animals.length===1?'':'s'} currently in "${name}".`, animals.map(a=>a.id));
+}
+function openUnassignedMoveModal(){
+  const animals = unassignedAnimals();
+  if(animals.length===0){ toast('No unassigned animals'); return; }
+  openMoveModal(`Assigning ${animals.length} unassigned animal${animals.length===1?'':'s'} to a pasture.`, animals.map(a=>a.id));
+}
+function openMoveModal(title, animalIds){
+  moveModalIds = animalIds.slice();
+  const body = `
+    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">${escapeHtml(title)}</p>
+    <div class="field">
+      <label>Move to pasture</label>
+      <input type="text" id="move-dest-input" list="pasture-options-move" placeholder="Choose an existing pasture or type a new one">
+      ${pastureOptionsDatalist('pasture-options-move')}
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" onclick="confirmUnassignMove()">Unassign (remove pasture)</button>
+      <div style="flex:1;"></div>
+      <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn rust" onclick="confirmMove()">Move</button>
+    </div>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell('Move to pasture', body);
+}
+function confirmMove(){
+  const input = document.getElementById('move-dest-input');
+  const dest = input.value.trim();
+  if(!dest){ toast('Enter or choose a pasture name'); return; }
+  ensurePastureExists(dest);
+  moveModalIds.forEach(id=>{ const a=animalById(id); if(a) a.pasture = dest; });
+  const count = moveModalIds.length;
+  selectedAnimalIds.clear();
+  saveState();
+  closeModal();
+  render();
+  toast(`Moved ${count} animal${count===1?'':'s'} to ${dest}`);
+}
+function confirmUnassignMove(){
+  moveModalIds.forEach(id=>{ const a=animalById(id); if(a) a.pasture = ''; });
+  const count = moveModalIds.length;
+  selectedAnimalIds.clear();
+  saveState();
+  closeModal();
+  render();
+  toast(`Removed pasture for ${count} animal${count===1?'':'s'}`);
+}
+
+/* =========================================================
+   HEALTH
+========================================================= */
+function viewHealth(){
+  const events = [...state.events].sort((a,b)=> a.date<b.date?1:-1);
+  return `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;">Health &amp; event log</div>
+      <div style="flex:1;"></div>
+      <button class="btn rust" onclick="openEventModal()">+ Log event</button>
+    </div>
+    ${events.length===0 ? `<div class="empty-state"><div class="icon">💉</div><h3>No events logged</h3><p>Track vaccinations, treatments, weights, and more.</p></div>` :
+    `<div class="panel" style="padding:6px 22px 10px;">
+      <table class="ledger">
+        <thead><tr><th>Date</th><th>Animal</th><th>Type</th><th>Notes</th><th>Next due</th></tr></thead>
+        <tbody>
+          ${events.map(ev=>{
+            const a = animalById(ev.animalId);
+            return `<tr onclick="${a?`openDrawer('${a.id}')`:''}">
+              <td class="num-cell">${fmtDate(ev.date)}</td>
+              <td>${a? eartag(a) : '<span class="muted">Unknown</span>'}</td>
+              <td>${escapeHtml(ev.type)}${ev.vaccine? `<div class="muted" style="font-size:11.5px;margin-top:2px;">${escapeHtml(ev.vaccine)}</div>`:''}</td>
+              <td class="muted">${escapeHtml(ev.notes||'—')}</td>
+              <td class="num-cell">${ev.nextDue? fmtDate(ev.nextDue) : '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  `;
+}
+
+/* =========================================================
+   BREEDING
+========================================================= */
+function viewBreeding(){
+  const records = [...state.breeding].sort((a,b)=> a.breedingDate<b.breedingDate?1:-1);
+  return `
+    <div class="toolbar">
+      <div class="section-title" style="margin:0;">Breeding &amp; calving</div>
+      <div style="flex:1;"></div>
+      <button class="btn rust" onclick="openBreedingModal()">+ Add breeding record</button>
+    </div>
+    ${records.length===0 ? `<div class="empty-state"><div class="icon">📅</div><h3>No breeding records</h3><p>Log a breeding date to auto-calculate the expected calving date (${GESTATION_DAYS}-day gestation).</p></div>` :
+    `<div class="panel" style="padding:6px 22px 10px;">
+      <table class="ledger">
+        <thead><tr><th>Cow</th><th>Method</th><th>Sire</th><th>Bred</th><th>Expected calving</th><th>Result</th></tr></thead>
+        <tbody>
+          ${records.map(b=>{
+            const cow = animalByTag(b.cowTagId);
+            const days = daysBetween(todayStr(), b.expectedCalvingDate);
+            return `<tr onclick="openBreedingModal('${b.id}')">
+              <td>${cow? eartag(cow): `<span class="mono">${escapeHtml(b.cowTagId)}</span>`}</td>
+              <td>${b.method}</td>
+              <td>${sireDisplay(b)}</td>
+              <td class="num-cell">${fmtDate(b.breedingDate)}</td>
+              <td class="num-cell">${fmtDate(b.expectedCalvingDate)} ${b.actualCalvingDate? '' : days>=0 && days<60 ? `<span class="status-tag">${days}d</span>`:''}</td>
+              <td><span class="status-tag">${b.actualCalvingDate? 'Calved' : (b.result||'Pending')}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  `;
+}
+
+/* =========================================================
+   MODAL: helpers
+========================================================= */
+function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
+function modalShell(title, bodyHtml){
+  return `<div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+      <div class="modal-head"><h3>${title}</h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+      ${bodyHtml}
+    </div>
+  </div>`;
+}
+
+/* ---------- Google Drive sync ---------- */
+const DRIVE_APPS_SCRIPT = `/**
+ * Rangebook — Google Drive sync backend.
+ * Deploy this as a Web App (Deploy > New deployment > Web app,
+ * Execute as "Me", Who has access "Anyone"), then paste the
+ * resulting URL and the SECRET below into the app's
+ * "Google Drive sync" screen.
+ *
+ * All data is stored in one JSON file in the Drive of whichever
+ * Google account you deploy this under — every device that
+ * connects with the same URL + secret reads and writes that
+ * same file, with no per-visitor sign-in.
+ */
+const SECRET = 'CHANGE_ME_TO_A_LONG_RANDOM_STRING';
+const FILE_NAME = 'rangebook-herd-data.json';
+
+function getOrCreateFile_() {
+  const files = DriveApp.getFilesByName(FILE_NAME);
+  if (files.hasNext()) return files.next();
+  return DriveApp.createFile(FILE_NAME, '{}', MimeType.PLAIN_TEXT);
+}
+
+function doGet(e) {
+  if (!e || !e.parameter || e.parameter.secret !== SECRET) {
+    return ContentService.createTextOutput(JSON.stringify({ error: 'unauthorized' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  const file = getOrCreateFile_();
+  return ContentService.createTextOutput(file.getBlob().getDataAsString())
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: 'bad request' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (body.secret !== SECRET) {
+    return ContentService.createTextOutput(JSON.stringify({ error: 'unauthorized' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  const file = getOrCreateFile_();
+  file.setContent(body.data);
+  return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+`;
+function downloadDriveScript(){
+  const blob = new Blob([DRIVE_APPS_SCRIPT], { type:'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rangebook-drive-sync.gs';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+function openDriveModal(){
+  const cfg = driveConfig || { url:'', secret:'' };
+  const connected = !!cfg.url;
+  const statusColor = driveStatus==='error' ? 'var(--danger)' : (connected ? 'var(--pasture)' : 'var(--ink-faint)');
+  const statusLabel = !connected ? 'Not connected' : (driveStatus==='error' ? 'Connected — last sync failed' : 'Connected to Google Drive');
+  const body = `
+    <div class="field" style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span style="width:9px;height:9px;border-radius:50%; background:${statusColor}; display:inline-block; flex-shrink:0;"></span>
+        <strong style="font-size:13.5px;">${statusLabel}</strong>
+      </div>
+      <p class="hint" style="margin:0;">${connected
+        ? `Every device that connects with this same URL reads and writes the same file in that Google account's Drive.${driveLastSync ? ' Last synced '+driveLastSync.toLocaleTimeString()+'.' : ''}`
+        : `Store this app's data in one Google Drive account instead of the browser, so it's the same on every device — no sign-in prompt for anyone using the app.`}</p>
+    </div>
+    ${!connected ? `
+    <div class="field" style="background:var(--surface-2); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
+      <label style="margin-bottom:6px;">One-time setup (~3 minutes)</label>
+      <ol style="margin:0; padding-left:18px; font-size:12.5px; color:var(--ink-soft); line-height:1.7;">
+        <li>Sign into the Google account you want the data stored in, then go to <span class="mono">script.google.com</span> → New project.</li>
+        <li>Delete the placeholder code and paste in the script below.</li>
+        <li>Change <span class="mono">SECRET</span> at the top to a password only you know, then save.</li>
+        <li>Deploy → New deployment → type "Web app" → Execute as "Me" → Who has access "Anyone" → Deploy.</li>
+        <li>Copy the Web app URL it gives you, and paste it and your secret in below.</li>
+      </ol>
+      <button type="button" class="btn ghost sm" style="margin-top:10px;" onclick="downloadDriveScript()">Download the script (.gs)</button>
+    </div>` : ''}
+    <form onsubmit="saveDriveConnection(event)">
+      <div class="field"><label>Web app URL</label><input type="text" name="url" value="${escapeHtml(cfg.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+      <div class="field"><label>Shared secret</label><input type="text" name="secret" value="${escapeHtml(cfg.secret)}" placeholder="Must match SECRET in the script"></div>
+      <div class="modal-actions">
+        ${connected? `<button type="button" class="btn ghost" style="margin-right:auto; color:var(--danger);" onclick="disconnectDrive()">Disconnect</button>`:''}
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        ${connected? `<button type="button" class="btn ghost" onclick="testDriveConnection()">Test connection</button>`:''}
+        <button type="submit" class="btn rust">${connected? 'Save':'Connect'}</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell('Google Drive sync', body);
+}
+async function saveDriveConnection(evt){
+  evt.preventDefault();
+  const f = evt.target;
+  const url = f.url.value.trim();
+  const secret = f.secret.value.trim();
+  if(!url){ toast('Paste the Web app URL from your Apps Script deployment'); return; }
+  const submitBtn = f.querySelector('button[type="submit"]');
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Connecting…'; }
+  const prevCfg = driveConfig;
+  persistDriveConfig({ url, secret });
+  try{
+    const parsed = await driveFetchState();
+    driveStatus = 'connected';
+    if(parsed && (parsed.animals || parsed.pastures || parsed.events || parsed.breeding)){
+      applyLoadedState(parsed);
+    } else {
+      await driveSaveState();
+      driveLastSync = new Date();
+    }
+    closeModal();
+    render();
+    toast('Connected to Google Drive');
+  }catch(e){
+    persistDriveConfig(prevCfg);
+    driveStatus = 'error';
+    toast("Couldn't connect — check the URL, secret, and that access is set to \"Anyone\"");
+    openDriveModal();
+  }
+  refreshDriveStatusUI();
+}
+function disconnectDrive(){
+  persistDriveConfig({ url:'', secret:'' });
+  driveStatus = 'idle';
+  refreshDriveStatusUI();
+  closeModal();
+  toast('Disconnected — data will now be stored on this device only');
+}
+async function testDriveConnection(){
+  try{
+    await driveFetchState();
+    driveStatus = 'connected';
+    toast('Connection OK');
+  }catch(e){
+    driveStatus = 'error';
+    toast('Connection failed — check the URL, secret, and deployment access');
+  }
+  refreshDriveStatusUI();
+  openDriveModal();
+}
+
+/* ---------- Settings modal ---------- */
+function openSettingsModal(){
+  const body = `
+    <div class="field">
+      <label>Herd data</label>
+      <button type="button" class="btn rust" style="width:100%; justify-content:center;" onclick="closeModal(); openAnimalModal();">+ Add animal</button>
+    </div>
+    <div class="field" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
+      <label>Breed library</label>
+      <p class="hint" style="margin:0 0 10px;">Breeds you add here show up in the Breed dropdown when adding or editing an animal.</p>
+      <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
+        <input type="color" id="new-breed-color" value="${BREED_PALETTE[state.breeds.length % BREED_PALETTE.length]}" title="Breed color" style="width:36px; height:36px; padding:0; border:none; border-radius:6px; cursor:pointer; flex-shrink:0;">
+        <input type="text" id="new-breed-input" placeholder="e.g. Angus" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addBreedFromSettings();}">
+        <button type="button" class="btn ghost sm" onclick="addBreedFromSettings()">Add</button>
+      </div>
+      <div id="breed-chip-list">${renderBreedChips()}</div>
+    </div>
+    <div class="field" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
+      <label>Vaccine library</label>
+      <p class="hint" style="margin:0 0 10px;">Vaccines you add here show up in the Vaccine dropdown when logging a Vaccination event.</p>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input type="text" id="new-vaccine-input" placeholder="e.g. Bovi-Shield Gold" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addVaccineFromSettings();}">
+        <button type="button" class="btn ghost sm" onclick="addVaccineFromSettings()">Add</button>
+      </div>
+      <div id="vaccine-chip-list">${renderVaccineChips()}</div>
+    </div>
+    <div class="field" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
+      <label style="color:var(--danger);">Danger zone</label>
+      <p class="hint" style="margin:0 0 12px;">Permanently deletes every animal, pasture, health record, and breeding record stored in this app. This can't be undone.</p>
+      <button type="button" id="reset-hold-btn" class="hold-reset-btn"
+        onmousedown="startResetHold()" onmouseup="cancelResetHold()" onmouseleave="cancelResetHold()"
+        ontouchstart="startResetHold(event)" ontouchend="cancelResetHold()" ontouchcancel="cancelResetHold()">
+        <div id="reset-hold-fill" class="hold-reset-fill"></div>
+        <span class="hold-reset-label" id="reset-hold-label">Press and hold 10s to reset all data</span>
+      </button>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" onclick="closeModal()">Close</button>
+    </div>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell('Settings', body);
+}
+
+let resetHoldStart = null;
+let resetHoldRAF = null;
+const RESET_HOLD_MS = 10000;
+function startResetHold(evt){
+  if(evt && evt.preventDefault) evt.preventDefault();
+  if(resetHoldRAF) return;
+  const btn = document.getElementById('reset-hold-btn');
+  if(!btn) return;
+  btn.classList.add('holding');
+  resetHoldStart = Date.now();
+  const step = ()=>{
+    const fill = document.getElementById('reset-hold-fill');
+    const label = document.getElementById('reset-hold-label');
+    if(!fill || !label){ cancelResetHold(); return; }
+    const elapsed = Date.now() - resetHoldStart;
+    const pct = Math.min(100, (elapsed / RESET_HOLD_MS) * 100);
+    fill.style.width = pct + '%';
+    if(pct >= 100){
+      label.textContent = 'Resetting…';
+      performReset();
+      return;
+    }
+    const secsLeft = Math.ceil((RESET_HOLD_MS - elapsed) / 1000);
+    label.textContent = `Keep holding… ${secsLeft}s`;
+    resetHoldRAF = requestAnimationFrame(step);
+  };
+  resetHoldRAF = requestAnimationFrame(step);
+}
+function cancelResetHold(){
+  if(resetHoldRAF) cancelAnimationFrame(resetHoldRAF);
+  resetHoldRAF = null;
+  resetHoldStart = null;
+  const btn = document.getElementById('reset-hold-btn');
+  const fill = document.getElementById('reset-hold-fill');
+  const label = document.getElementById('reset-hold-label');
+  if(btn) btn.classList.remove('holding');
+  if(fill) fill.style.width = '0%';
+  if(label) label.textContent = 'Press and hold 10s to reset all data';
+}
+function performReset(){
+  if(resetHoldRAF) cancelAnimationFrame(resetHoldRAF);
+  resetHoldRAF = null;
+  resetHoldStart = null;
+  state.animals = [];
+  state.events = [];
+  state.breeding = [];
+  state.pastures = [];
+  state.breeds = [];
+  state.vaccines = [];
+  selectedAnimalIds.clear();
+  saveState();
+  closeModal();
+  currentTab = 'dashboard';
+  render();
+  toast('All data has been reset');
+}
+
+
+/* ---------- Animal modal ---------- */
+let animalFormPhoto = null;
+function renderAnimalModalPhotoBlock(){
+  if(animalFormPhoto){
+    return `<img src="${animalFormPhoto}" alt="Animal photo" style="width:100%;max-height:180px;object-fit:cover;border-radius:4px;margin-bottom:8px;border:1px solid var(--line-soft);">
+      <button type="button" class="btn ghost sm" onclick="removeAnimalFormPhoto()">Remove photo</button>`;
+  }
+  return `<p class="hint" style="margin:0 0 8px;">No photo yet.</p>`;
+}
+function handleAnimalFileChange(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  resizeImageFile(file).then(dataUrl=>{
+    animalFormPhoto = dataUrl;
+    const block = document.getElementById('animal-photo-block');
+    if(block) block.innerHTML = renderAnimalModalPhotoBlock();
+  }).catch(()=>{
+    toast("Couldn't read that photo — try a JPG or PNG");
+  });
+}
+function removeAnimalFormPhoto(){
+  animalFormPhoto = null;
+  const block = document.getElementById('animal-photo-block');
+  if(block) block.innerHTML = renderAnimalModalPhotoBlock();
+}
+function openAnimalModal(presetKlass, editId){
+  const editing = editId ? animalById(editId) : null;
+  const a = editing || { id:uid(), tagId:'', name:'', klass:presetKlass||'Cow', breed:'', dob:'', yearLetter:'', damId:'', sireId:'', status:'active', pasture:'', notes:'', salePrice:'', weights:[], photo:null };
+  animalFormPhoto = a.photo || null;
+  const body = `
+    <form onsubmit="saveAnimal(event, '${a.id}', ${editing? 'true':'false'})">
+      ${!editing ? `<div class="field" style="margin-bottom:18px; padding:10px 12px; background:var(--surface-2); border-radius:var(--radius); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <span class="hint" style="margin:0;">Adding more than one? Import a spreadsheet instead.</span>
+        <button type="button" class="btn ghost sm" onclick="closeModal(); openImportModal();">Import .xlsx</button>
+      </div>` : ''}
+      <div class="field-row">
+        <div class="field"><label>Tag ID *</label><input type="text" name="tagId" required value="${escapeHtml(a.tagId)}" placeholder="e.g. 214"></div>
+        <div class="field"><label>Name (optional)</label><input type="text" name="name" value="${escapeHtml(a.name)}" placeholder="e.g. Clover"></div>
+      </div>
+      <div class="field">
+        <label>Photo</label>
+        <div id="animal-photo-block">${renderAnimalModalPhotoBlock()}</div>
+        <input type="file" accept="image/*" onchange="handleAnimalFileChange(event)">
+        <p class="hint">Optional — a quick reference photo. Resized automatically.</p>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Class *</label>
+          <select name="klass">${CLASSES.map(c=>`<option value="${c}" ${a.klass===c?'selected':''}>${c}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Breed</label>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span id="breed-color-dot" style="width:11px; height:11px; border-radius:50%; flex-shrink:0; background:${breedColor(a.breed)}; border:1px solid rgba(0,0,0,0.15);"></span>
+            <select name="breed" id="breed-select" data-prev="${escapeHtml(a.breed)}" onchange="handleBreedSelectChange(this)" style="flex:1;">${breedOptionsHtml(a.breed)}</select>
+          </div>
+        </div>
+      </div>
+      <div class="field-row three">
+        <div class="field"><label>Date of birth</label><input type="date" name="dob" value="${a.dob||''}"></div>
+        <div class="field"><label>Year letter</label><input type="text" name="yearLetter" maxlength="2" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. Y" style="text-transform:uppercase;"></div>
+        <div class="field"><label>Status</label>
+          <select name="status" id="animal-status-select" onchange="toggleSalePriceField()">
+            <option value="active" ${a.status==='active'?'selected':''}>Active</option>
+            <option value="sold" ${a.status==='sold'?'selected':''}>Sold</option>
+            <option value="deceased" ${a.status==='deceased'?'selected':''}>Deceased</option>
+          </select>
+        </div>
+      </div>
+      <div id="sale-price-field" class="field" style="display:${a.status==='sold'?'block':'none'};">
+        <label>Sale price</label>
+        <input type="number" name="salePrice" min="0" step="0.01" value="${escapeHtml(a.salePrice)}" placeholder="e.g. 1450">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Dam tag (if calf)</label><input type="text" name="damId" value="${escapeHtml(a.damId)}" placeholder="Mother's tag ID"></div>
+        <div class="field"><label>Sire</label><input type="text" name="sireId" value="${escapeHtml(a.sireId)}" placeholder="Tag or 'AI'"></div>
+      </div>
+      <div class="field"><label>Pasture / location</label><input type="text" name="pasture" list="pasture-options-animal" value="${escapeHtml(a.pasture)}" placeholder="e.g. North 40">${pastureOptionsDatalist('pasture-options-animal')}</div>
+      <div class="field"><label>Notes</label><textarea name="notes" placeholder="Temperament, markings, anything worth remembering">${escapeHtml(a.notes)}</textarea></div>
+      <div class="modal-actions">
+        ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deleteAnimal('${a.id}')">Delete</button>`:''}
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn rust">${editing? 'Save changes':'Add animal'}</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell(editing? 'Edit animal':'Add animal', body);
+  if(!editing) state._pendingAnimal = a;
+}
+function toggleSalePriceField(){
+  const sel = document.getElementById('animal-status-select');
+  const box = document.getElementById('sale-price-field');
+  if(!sel || !box) return;
+  box.style.display = sel.value==='sold' ? 'block' : 'none';
+}
+function saveAnimal(evt, id, editing){
+  evt.preventDefault();
+  const f = evt.target;
+  const rec = {
+    id,
+    tagId: f.tagId.value.trim(),
+    name: f.name.value.trim(),
+    klass: f.klass.value,
+    breed: f.breed.value.trim(),
+    dob: f.dob.value,
+    yearLetter: f.yearLetter.value.trim().toUpperCase(),
+    status: f.status.value,
+    damId: f.damId.value.trim(),
+    sireId: f.sireId.value.trim(),
+    pasture: f.pasture.value.trim(),
+    notes: f.notes.value.trim(),
+    salePrice: f.status.value==='sold' && f.salePrice.value ? Number(f.salePrice.value) : '',
+    photo: animalFormPhoto,
+  };
+  ensurePastureExists(rec.pasture);
+  ensureBreedExists(rec.breed);
+  if(editing){
+    const idx = state.animals.findIndex(a=>a.id===id);
+    state.animals[idx] = { ...state.animals[idx], ...rec };
+  } else {
+    rec.weights = [];
+    rec.weanDate = null;
+    state.animals.push(rec);
+  }
+  saveState();
+  closeModal();
+  render();
+  toast(editing? 'Animal updated' : 'Animal added');
+}
+function deleteAnimal(id){
+  if(!confirm('Delete this animal and its records? This cannot be undone.')) return;
+  state.animals = state.animals.filter(a=>a.id!==id);
+  state.events = state.events.filter(e=>e.animalId!==id);
+  saveState();
+  closeModal();
+  closeDrawer();
+  render();
+  toast('Animal deleted');
+}
+
+/* ---------- Import from spreadsheet ---------- */
+const IMPORT_HEADER_MAP = {
+  tagid:'tagId', tag:'tagId', tagnumber:'tagId', eartag:'tagId', eartagid:'tagId', id:'tagId',
+  name:'name', animalname:'name',
+  class:'klass', type:'klass', category:'klass', sex:'klass', animalclass:'klass',
+  breed:'breed',
+  dob:'dob', dateofbirth:'dob', birthdate:'dob', born:'dob', birthday:'dob',
+  yearletter:'yearLetter', yrletter:'yearLetter', year:'yearLetter', letter:'yearLetter', tattoo:'yearLetter', tattooletter:'yearLetter',
+  dam:'damId', damtag:'damId', mother:'damId', damid:'damId', damtagid:'damId',
+  sire:'sireId', siretag:'sireId', father:'sireId', sireid:'sireId', siretagid:'sireId',
+  status:'status',
+  pasture:'pasture', location:'pasture', paddock:'pasture',
+  notes:'notes', comments:'notes', comment:'notes',
+  weight:'weight', currentweight:'weight', weightlb:'weight', weightlbs:'weight',
+};
+let importRows = [];
+
+function normalizeHeader(h){ return String(h||'').trim().toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function normalizeClass(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(!s) return 'Cow';
+  if(s.includes('bull') && s.includes('calf')) return 'Bull Calf';
+  if(s.includes('heifer') && s.includes('calf')) return 'Heifer Calf';
+  if(s.startsWith('cow')) return 'Cow';
+  if(s.startsWith('bull') || s==='b' || s==='m' || s==='male') return 'Bull';
+  if(s.startsWith('heifer')) return 'Heifer';
+  if(s.startsWith('steer')) return 'Steer';
+  if(s.includes('calf')) return 'Heifer Calf';
+  if(s==='f'||s==='female') return 'Cow';
+  return 'Cow';
+}
+function normalizeStatus(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(s.startsWith('sold')) return 'sold';
+  if(s.startsWith('dead') || s.startsWith('decease')) return 'deceased';
+  return 'active';
+}
+function parseDateFlexible(v){
+  if(!v && v!==0) return '';
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  const s = String(v).trim();
+  if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const d = new Date(s);
+  if(!isNaN(d)) return d.toISOString().slice(0,10);
+  return '';
+}
+
+function openImportModal(){
+  const body = `
+    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Columns can be in any order (case-insensitive): <strong>Tag ID</strong> (required), Name, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight.</p>
+    <div class="field">
+      <label>Spreadsheet file</label>
+      <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" onchange="handleImportFile(event)">
+    </div>
+    <div id="import-preview"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" onclick="downloadImportTemplate()">Download template</button>
+      <div style="flex:1;"></div>
+      <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn rust" id="import-confirm-btn" disabled onclick="confirmImport()">Import</button>
+    </div>
+  `;
+  importRows = [];
+  document.getElementById('modal-root').innerHTML = modalShell('Import animals from spreadsheet', body);
+}
+
+function handleImportFile(evt){
+  const file = evt.target.files[0];
+  const previewEl = document.getElementById('import-preview');
+  if(!file) return;
+  if(typeof XLSX === 'undefined'){
+    previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">The spreadsheet reader didn't load — check your connection and try again.</p>`;
+    return;
+  }
+  previewEl.innerHTML = `<p class="hint">Reading ${escapeHtml(file.name)}…</p>`;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type:'array', cellDates:true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
+      if(rows.length === 0){
+        previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">That file doesn't have any rows we could read.</p>`;
+        return;
+      }
+      processImportRows(rows);
+    }catch(err){
+      previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't read that file. Make sure it's a valid .xlsx, .xls, or .csv export.</p>`;
+    }
+  };
+  reader.onerror = function(){
+    previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't read that file.</p>`;
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function processImportRows(rows){
+  const existingTags = new Set(state.animals.map(a=>a.tagId));
+  const seenInFile = new Set();
+  importRows = rows.map(row=>{
+    const rec = {};
+    Object.keys(row).forEach(h=>{
+      const key = IMPORT_HEADER_MAP[normalizeHeader(h)];
+      if(key && row[h]!=='') rec[key] = row[h];
+    });
+    const tagId = String(rec.tagId||'').trim();
+    let issue = '';
+    if(!tagId) issue = 'Missing tag ID';
+    else if(existingTags.has(tagId)) issue = 'Already in herd';
+    else if(seenInFile.has(tagId)) issue = 'Duplicate in file';
+    if(tagId) seenInFile.add(tagId);
+    return {
+      tagId,
+      name: String(rec.name||'').trim(),
+      klass: normalizeClass(rec.klass),
+      breed: String(rec.breed||'').trim(),
+      dob: parseDateFlexible(rec.dob),
+      yearLetter: String(rec.yearLetter||'').trim().toUpperCase(),
+      damId: String(rec.damId||'').trim(),
+      sireId: String(rec.sireId||'').trim(),
+      status: normalizeStatus(rec.status),
+      pasture: String(rec.pasture||'').trim(),
+      notes: String(rec.notes||'').trim(),
+      weight: rec.weight,
+      issue
+    };
+  });
+  renderImportPreview();
+}
+
+function renderImportPreview(){
+  const valid = importRows.filter(r=>!r.issue);
+  const invalid = importRows.filter(r=>r.issue);
+  const el = document.getElementById('import-preview');
+  const btn = document.getElementById('import-confirm-btn');
+  if(btn) btn.disabled = valid.length===0;
+  el.innerHTML = `
+    <div class="panel" style="margin:14px 0 0; padding:14px 16px;">
+      <p style="margin:0 0 10px; font-size:13px;"><strong>${valid.length}</strong> ready to import${invalid.length? `, <strong>${invalid.length}</strong> skipped`:''}.</p>
+      <div style="max-height:220px; overflow-y:auto;">
+        <table class="ledger import-table" style="font-size:12.5px;">
+          <thead><tr><th>Tag</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
+          <tbody>
+            ${importRows.slice(0,80).map(r=>`<tr>
+              <td>${escapeHtml(r.tagId)||'<span class="muted">—</span>'}</td>
+              <td>${r.klass}</td>
+              <td class="num-cell">${r.dob? fmtDate(r.dob) : '<span class="muted">—</span>'}</td>
+              <td>${r.issue? `<span class="status-tag" style="color:var(--danger);">${escapeHtml(r.issue)}</span>` : '<span class="status-tag">Ready</span>'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      ${importRows.length>80? `<p class="hint">Showing first 80 of ${importRows.length} rows.</p>`:''}
+    </div>
+  `;
+}
+
+function confirmImport(){
+  const valid = importRows.filter(r=>!r.issue);
+  if(valid.length===0) return;
+  valid.forEach(r=>{
+    const weights = [];
+    if(r.weight){
+      const w = Number(r.weight);
+      if(!isNaN(w) && w>0) weights.push({ date: r.dob || todayStr(), lbs: w });
+    }
+    if(r.pasture) ensurePastureExists(r.pasture);
+    if(r.breed) ensureBreedExists(r.breed);
+    state.animals.push({
+      id: uid(), tagId: r.tagId, name: r.name, klass: r.klass, breed: r.breed, dob: r.dob, yearLetter: r.yearLetter,
+      damId: r.damId, sireId: r.sireId, status: r.status, pasture: r.pasture, notes: r.notes,
+      weights, weanDate: null
+    });
+  });
+  saveState();
+  closeModal();
+  currentTab = 'animals';
+  render();
+  toast(`Imported ${valid.length} animal${valid.length===1?'':'s'}`);
+}
+
+function downloadImportTemplate(){
+  if(typeof XLSX === 'undefined'){ toast("Spreadsheet tool didn't load — check your connection"); return; }
+  const headers = ['Tag ID','Name','Class','Breed','DOB','Year Letter','Dam','Sire','Status','Pasture','Notes'];
+  const example = ['214','Clover','Cow','Angus','2021-03-14','Y','','88','active','North 40','Easy calver'];
+  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Animals');
+  XLSX.writeFile(wb, 'rangebook-import-template.xlsx');
+}
+
+/* ---------- Event modal ---------- */
+function openEventModal(presetAnimalId){
+  const activeAnimals = state.animals.filter(a=>a.status==='active').sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  if(activeAnimals.length===0){
+    toast('Add an animal first');
+    return;
+  }
+  const showToggle = !presetAnimalId;
+  const individualBlock = `
+    <div class="field" id="individual-animal-block">
+      <label>Animal *</label>
+      <select name="animalId" id="event-animal-select" required>
+        ${activeAnimals.map(a=>`<option value="${a.id}" ${presetAnimalId===a.id?'selected':''}>${a.tagId} — ${a.klass}${a.name? ' ('+a.name+')':''}</option>`).join('')}
+      </select>
+    </div>`;
+  const groupBlock = presetAnimalId ? '' : `
+    <div class="field" id="group-animal-block" style="display:none;">
+      <label>Select animals *</label>
+      <select id="event-pasture-quickselect" onchange="quickSelectPastureForEvent(this.value)" style="margin-bottom:8px;">
+        <option value="">Quick-select by pasture…</option>
+        ${state.pastures.map(p=>`<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+      <div class="checkbox-list" id="group-animal-checklist">
+        ${activeAnimals.map(a=>`<label class="checkbox-row"><input type="checkbox" name="groupAnimalIds" value="${a.id}" data-pasture="${escapeHtml(a.pasture||'')}"> ${eartag(a)} ${a.klass}${a.name? ' '+escapeHtml(a.name):''}${a.pasture? ` <span class="muted" style="font-size:11px;">— ${escapeHtml(a.pasture)}</span>`:''}</label>`).join('')}
+      </div>
+    </div>`;
+  const body = `
+    <form onsubmit="saveEvent(event)">
+      <input type="hidden" id="event-mode-input" value="individual">
+      ${showToggle ? `<div class="field">
+        <label>Log for</label>
+        <div class="chip-toggle">
+          <button type="button" class="chip active" id="event-mode-individual-btn" onclick="setEventMode('individual')">Individual animal</button>
+          <button type="button" class="chip" id="event-mode-group-btn" onclick="setEventMode('group')">Group / pasture</button>
+        </div>
+      </div>` : ''}
+      ${individualBlock}
+      ${groupBlock}
+      <div class="field-row">
+        <div class="field"><label>Event type *</label>
+          <select name="type" id="event-type-select" onchange="toggleCalvingFields(); toggleVaccineField(); enforceGroupCalvingRestriction();">${EVENT_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Date *</label><input type="date" name="date" required value="${todayStr()}"></div>
+      </div>
+      <div id="vaccine-field" style="display:none;" class="field">
+        <label>Vaccine</label>
+        <select name="vaccine" id="vaccine-select" onchange="handleVaccineSelectChange(this)">${vaccineOptionsHtml('')}</select>
+      </div>
+      <div id="calving-fields" style="display:none;">
+        <div class="field-row">
+          <div class="field"><label>Calf born *</label>
+            <select name="calfSex">
+              <option value="Heifer">Heifer</option>
+              <option value="Bull">Bull</option>
+            </select>
+          </div>
+          <div class="field"><label>Calf tag ID *</label><input type="text" name="calfTagId" placeholder="e.g. 512"></div>
+        </div>
+        <p class="hint" style="margin-top:-6px; margin-bottom:14px;">We'll add the calf to your herd automatically, paired to this dam.</p>
+      </div>
+      <div class="field" id="weight-field-block"><label>Weight (lb, if applicable)</label><input type="number" name="weight" min="0" placeholder="e.g. 68"></div>
+      <div class="field"><label>Notes</label><textarea name="notes" placeholder="Product used, dosage, observations…"></textarea></div>
+      <div class="field"><label>Next due date (optional)</label><input type="date" name="nextDue"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn rust">Save event</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell('Log health event', body);
+}
+function setEventMode(mode){
+  const indivBtn = document.getElementById('event-mode-individual-btn');
+  const groupBtn = document.getElementById('event-mode-group-btn');
+  if(indivBtn) indivBtn.classList.toggle('active', mode==='individual');
+  if(groupBtn) groupBtn.classList.toggle('active', mode==='group');
+  const indivBlock = document.getElementById('individual-animal-block');
+  const groupBlock = document.getElementById('group-animal-block');
+  if(indivBlock) indivBlock.style.display = mode==='individual' ? 'block' : 'none';
+  if(groupBlock) groupBlock.style.display = mode==='group' ? 'block' : 'none';
+  const animalSelect = document.getElementById('event-animal-select');
+  if(animalSelect) animalSelect.required = (mode==='individual');
+  const weightBlock = document.getElementById('weight-field-block');
+  if(weightBlock) weightBlock.style.display = mode==='individual' ? 'block' : 'none';
+  const modeInput = document.getElementById('event-mode-input');
+  if(modeInput) modeInput.value = mode;
+}
+function quickSelectPastureForEvent(name){
+  if(!name) return;
+  const boxes = document.querySelectorAll('#group-animal-checklist input[type=checkbox]');
+  boxes.forEach(cb=>{ if(cb.dataset.pasture === name) cb.checked = true; });
+}
+function enforceGroupCalvingRestriction(){
+  const modeInput = document.getElementById('event-mode-input');
+  const typeSel = document.getElementById('event-type-select');
+  if(!modeInput || !typeSel) return;
+  if(modeInput.value==='group' && typeSel.value==='Calving'){
+    toast('Calving must be logged for one animal — switched to Individual');
+    setEventMode('individual');
+  }
+}
+function toggleCalvingFields(){
+  const sel = document.getElementById('event-type-select');
+  const box = document.getElementById('calving-fields');
+  if(!sel || !box) return;
+  box.style.display = sel.value==='Calving' ? 'block' : 'none';
+}
+function toggleVaccineField(){
+  const sel = document.getElementById('event-type-select');
+  const box = document.getElementById('vaccine-field');
+  if(!sel || !box) return;
+  box.style.display = sel.value==='Vaccination' ? 'block' : 'none';
+}
+function saveEvent(evt){
+  evt.preventDefault();
+  const f = evt.target;
+  const modeInput = document.getElementById('event-mode-input');
+  const mode = modeInput ? modeInput.value : 'individual';
+  const type = f.type.value;
+
+  if(mode==='group'){
+    if(type==='Calving'){ toast('Calving must be logged for one animal at a time'); return; }
+    const checked = Array.from(f.querySelectorAll('input[name="groupAnimalIds"]:checked')).map(cb=>cb.value);
+    if(checked.length===0){ toast('Select at least one animal'); return; }
+    const date = f.date.value;
+    const notes = f.notes.value.trim();
+    const nextDue = f.nextDue.value || null;
+    const vaccine = type==='Vaccination' && f.vaccine ? f.vaccine.value.trim() : '';
+    if(vaccine) ensureVaccineExists(vaccine);
+    checked.forEach(animalId=>{
+      state.events.push({ id: uid(), animalId, type, date, notes, nextDue, vaccine });
+      if(type==='Weaning'){
+        const a = animalById(animalId);
+        if(a) a.weanDate = date;
+      }
+      if(type==='Death / Loss'){
+        const a = animalById(animalId);
+        if(a) a.status = 'deceased';
+      }
+      if(type==='Sale'){
+        const a = animalById(animalId);
+        if(a) a.status = 'sold';
+      }
+    });
+    saveState();
+    closeModal();
+    render();
+    toast(`Logged ${type} for ${checked.length} animal${checked.length===1?'':'s'}`);
+    return;
+  }
+
+  if(f.type.value === 'Calving'){
+    const calfTagId = f.calfTagId.value.trim();
+    if(!calfTagId){ toast('Enter a tag ID for the calf'); return; }
+    if(animalByTag(calfTagId)){ toast('That tag ID is already in use'); return; }
+  }
+
+  const ev = {
+    id: uid(),
+    animalId: f.animalId.value,
+    type: f.type.value,
+    date: f.date.value,
+    notes: f.notes.value.trim(),
+    nextDue: f.nextDue.value || null,
+    vaccine: f.type.value==='Vaccination' && f.vaccine ? f.vaccine.value.trim() : '',
+  };
+  if(ev.vaccine) ensureVaccineExists(ev.vaccine);
+  state.events.push(ev);
+
+  const weight = f.weight.value;
+  if(weight){
+    const a = animalById(ev.animalId);
+    if(a){
+      a.weights = a.weights || [];
+      a.weights.push({ date: ev.date, lbs: Number(weight) });
+    }
+  }
+  if(ev.type==='Weaning'){
+    const a = animalById(ev.animalId);
+    if(a) a.weanDate = ev.date;
+  }
+  let calfAdded = false;
+  if(ev.type==='Calving'){
+    const cow = animalById(ev.animalId);
+    const calfTagId = f.calfTagId.value.trim();
+    const calfSex = f.calfSex.value;
+    if(cow && calfTagId){
+      const rec = state.breeding.find(b=> b.cowTagId===cow.tagId && !b.actualCalvingDate);
+      if(rec){ rec.actualCalvingDate = ev.date; rec.result = 'Bred'; rec.calfTagId = calfTagId; }
+      state.animals.push({
+        id: uid(), tagId: calfTagId, name: '', klass: calfSex==='Bull' ? 'Bull Calf' : 'Heifer Calf',
+        breed: cow.breed || '', dob: ev.date, yearLetter: '',
+        damId: cow.tagId, sireId: rec ? (rec.sireTagId||'') : '',
+        status: 'active', pasture: cow.pasture || '', notes: '',
+        weights: [], weanDate: null
+      });
+      calfAdded = true;
+    }
+  }
+  if(ev.type==='Death / Loss'){
+    const a = animalById(ev.animalId);
+    if(a) a.status = 'deceased';
+  }
+  if(ev.type==='Sale'){
+    const a = animalById(ev.animalId);
+    if(a) a.status = 'sold';
+  }
+  saveState();
+  closeModal();
+  render();
+  toast(calfAdded ? 'Event logged and calf added to the herd' : 'Event logged');
+}
+
+/* ---------- Breeding modal ---------- */
+function openBreedingModal(editId, presetCowTagId){
+  const editing = editId ? state.breeding.find(b=>b.id===editId) : null;
+  const b = editing || { id:uid(), cowTagId:presetCowTagId||'', method:'Natural', sireTagIds:[], sireOther:'', sireTagId:'', breedingDate:todayStr(), result:'Pending', actualCalvingDate:'', calfTagId:'' };
+  const cows = state.animals.filter(a=>a.status==='active' && (a.klass==='Cow' || a.klass==='Heifer')).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
+  const activeBulls = state.animals.filter(a=>a.klass==='Bull' && a.status==='active').sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
+  const preSelectedBulls = new Set(b.sireTagIds || []);
+  let otherValue = b.sireOther || '';
+  if((!b.sireTagIds || b.sireTagIds.length===0) && !otherValue && b.sireTagId){
+    otherValue = b.sireTagId;
+  }
+  const excludeRecordId = editing ? b.id : null;
+  function bullUnavailable(tagId){
+    return state.breeding.some(rec=> rec.id!==excludeRecordId && !rec.actualCalvingDate && (rec.sireTagIds||[]).includes(tagId));
+  }
+
+  const bullsField = activeBulls.length===0
+    ? `<p class="hint" style="margin:0 0 8px;">No active bulls on file yet — add one from the Animals tab, or note the sire below.</p>`
+    : `<div class="checkbox-list">
+        ${activeBulls.map(bull=>{
+          const checked = preSelectedBulls.has(bull.tagId);
+          const unavailable = !checked && bullUnavailable(bull.tagId);
+          return `<label class="checkbox-row ${unavailable?'disabled':''}">
+            <input type="checkbox" name="sireTagIds" value="${escapeHtml(bull.tagId)}" ${checked?'checked':''} ${unavailable?'disabled':''}>
+            ${eartag(bull)}${bull.name? ' '+escapeHtml(bull.name):''}
+            ${unavailable? `<span class="muted" style="font-size:11px;">— already turned out</span>` : ''}
+          </label>`;
+        }).join('')}
+      </div>`;
+
+  const individualBlock = `
+    <div class="field" id="individual-cow-block">
+      <label>Cow / heifer tag *</label>
+      <input list="cow-list" type="text" name="cowTagId" id="cowTagId-input" required value="${escapeHtml(b.cowTagId)}" placeholder="Tag ID">
+      <datalist id="cow-list">${cows.map(c=>`<option value="${c.tagId}">`).join('')}</datalist>
+    </div>`;
+
+  const groupBlock = editing ? '' : `
+    <div class="field" id="group-cow-block" style="display:none;">
+      <label>Select cows / heifers *</label>
+      <select id="group-pasture-quickselect" onchange="quickSelectPasture(this.value)" style="margin-bottom:8px;">
+        <option value="">Quick-select by pasture…</option>
+        ${state.pastures.map(p=>`<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+      <div class="checkbox-list" id="group-cow-checklist">
+        ${cows.length===0 ? `<p class="hint" style="margin:4px;">No active cows or heifers on file yet.</p>` :
+        cows.map(c=>`<label class="checkbox-row"><input type="checkbox" name="groupCowTagIds" value="${escapeHtml(c.tagId)}" data-pasture="${escapeHtml(c.pasture||'')}"> ${eartag(c)}${c.name? ' '+escapeHtml(c.name):''}${c.pasture? ` <span class="muted" style="font-size:11px;">— ${escapeHtml(c.pasture)}</span>`:''}</label>`).join('')}
+      </div>
+    </div>`;
+
+  const perAnimalFields = editing ? `
+      <div class="field-row">
+        <div class="field"><label>Pregnancy check result</label>
+          <select name="result">
+            <option ${b.result==='Pending'?'selected':''}>Pending</option>
+            <option ${b.result==='Bred'?'selected':''}>Bred</option>
+            <option ${b.result==='Open'?'selected':''}>Open</option>
+          </select>
+        </div>
+        <div class="field"><label>Actual calving date</label><input type="date" name="actualCalvingDate" value="${b.actualCalvingDate||''}"></div>
+      </div>
+      <div class="field"><label>Calf tag (if born)</label><input type="text" name="calfTagId" value="${escapeHtml(b.calfTagId)}" placeholder="Tag ID assigned to the calf"></div>` : `
+      <p class="hint">Pregnancy check, calving, and calf tag are tracked per animal — you'll set those from each record once added.</p>`;
+
+  const body = `
+    <form onsubmit="saveBreeding(event, '${b.id}', ${editing?'true':'false'})">
+      <input type="hidden" id="breeding-mode-input" value="individual">
+      <div class="field">
+        <label>Breeding for</label>
+        ${editing ? `<p class="hint" style="margin:0;">Editing a single record.</p>` : `
+        <div class="chip-toggle">
+          <button type="button" class="chip active" id="mode-individual-btn" onclick="setBreedingMode('individual')">Individual animal</button>
+          <button type="button" class="chip" id="mode-group-btn" onclick="setBreedingMode('group')">Group / pasture</button>
+        </div>`}
+      </div>
+      ${individualBlock}
+      ${groupBlock}
+      <div class="field"><label>Method</label>
+        <select name="method">
+          <option ${b.method==='Natural'?'selected':''}>Natural</option>
+          <option ${b.method==='AI'?'selected':''}>AI</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Bull(s) turned out</label>
+        ${bullsField}
+        <p class="hint">Bulls already on an open breeding record (no calving logged yet) are greyed out so they don't get double-booked.</p>
+      </div>
+      <div class="field"><label>Other sire (AI / not in herd)</label><input type="text" name="sireOther" value="${escapeHtml(otherValue)}" placeholder="e.g. AI — semen ID"></div>
+      <div class="field"><label>Breeding date *</label><input type="date" name="breedingDate" required value="${b.breedingDate}"></div>
+      ${perAnimalFields}
+      <p class="hint">Expected calving date is calculated automatically: breeding date + ${GESTATION_DAYS} days.</p>
+      <div class="modal-actions">
+        ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deleteBreeding('${b.id}')">Delete</button>`:''}
+        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn rust">${editing?'Save changes':'Add record'}</button>
+      </div>
+    </form>
+  `;
+  document.getElementById('modal-root').innerHTML = modalShell(editing?'Edit breeding record':'Add breeding record', body);
+}
+function setBreedingMode(mode){
+  const indivBtn = document.getElementById('mode-individual-btn');
+  const groupBtn = document.getElementById('mode-group-btn');
+  if(indivBtn) indivBtn.classList.toggle('active', mode==='individual');
+  if(groupBtn) groupBtn.classList.toggle('active', mode==='group');
+  const indivBlock = document.getElementById('individual-cow-block');
+  const groupBlock = document.getElementById('group-cow-block');
+  if(indivBlock) indivBlock.style.display = mode==='individual' ? 'block' : 'none';
+  if(groupBlock) groupBlock.style.display = mode==='group' ? 'block' : 'none';
+  const cowInput = document.getElementById('cowTagId-input');
+  if(cowInput) cowInput.required = (mode==='individual');
+  const modeInput = document.getElementById('breeding-mode-input');
+  if(modeInput) modeInput.value = mode;
+}
+function quickSelectPasture(name){
+  if(!name) return;
+  const boxes = document.querySelectorAll('#group-cow-checklist input[type=checkbox]');
+  boxes.forEach(cb=>{ if(cb.dataset.pasture === name) cb.checked = true; });
+}
+function saveBreeding(evt, id, editing){
+  evt.preventDefault();
+  const f = evt.target;
+  const modeInput = document.getElementById('breeding-mode-input');
+  const mode = modeInput ? modeInput.value : 'individual';
+  const sireTagIds = Array.from(f.querySelectorAll('input[name="sireTagIds"]:checked')).map(cb=>cb.value);
+  const sireOther = f.sireOther.value.trim();
+  const method = f.method.value;
+  const breedingDate = f.breedingDate.value;
+  const sireTagId = [...sireTagIds, sireOther].filter(Boolean).join(', ');
+
+  if(!editing && mode==='group'){
+    const checked = Array.from(f.querySelectorAll('input[name="groupCowTagIds"]:checked')).map(cb=>cb.value);
+    if(checked.length===0){ toast('Select at least one cow or heifer'); return; }
+    checked.forEach(tag=>{
+      const rec = {
+        id: uid(), cowTagId: tag, method, sireTagIds, sireOther, sireTagId,
+        breedingDate, result:'Pending', actualCalvingDate: null, calfTagId: ''
+      };
+      rec.expectedCalvingDate = addDays(rec.breedingDate, GESTATION_DAYS);
+      state.breeding.push(rec);
+    });
+    saveState();
+    closeModal();
+    render();
+    toast(`Added breeding records for ${checked.length} animal${checked.length===1?'':'s'}`);
+    return;
+  }
+
+  const rec = {
+    id,
+    cowTagId: f.cowTagId.value.trim(),
+    method,
+    sireTagIds,
+    sireOther,
+    sireTagId,
+    breedingDate,
+    result: f.result ? f.result.value : 'Pending',
+    actualCalvingDate: f.actualCalvingDate ? (f.actualCalvingDate.value || null) : null,
+    calfTagId: f.calfTagId ? f.calfTagId.value.trim() : '',
+  };
+  rec.expectedCalvingDate = addDays(rec.breedingDate, GESTATION_DAYS);
+  if(editing){
+    const idx = state.breeding.findIndex(b=>b.id===id);
+    state.breeding[idx] = rec;
+  } else {
+    state.breeding.push(rec);
+  }
+  saveState();
+  closeModal();
+  render();
+  toast(editing? 'Breeding record updated' : 'Breeding record added');
+}
+function deleteBreeding(id){
+  if(!confirm('Delete this breeding record?')) return;
+  state.breeding = state.breeding.filter(b=>b.id!==id);
+  saveState();
+  closeModal();
+  render();
+  toast('Record deleted');
+}
+
+/* =========================================================
+   DETAIL DRAWER
+========================================================= */
+function closeDrawer(){ document.getElementById('drawer-root').innerHTML=''; }
+function openDrawer(id){
+  const a = animalById(id);
+  if(!a) return;
+  const events = state.events.filter(e=>e.animalId===id).sort((x,y)=> x.date<y.date?1:-1);
+  const weights = (a.weights||[]).slice().sort((x,y)=> x.date<y.date?1:-1);
+  const calves = state.animals.filter(c=>c.damId===a.tagId);
+  const dam = a.damId ? animalByTag(a.damId) : null;
+
+  const html = `<div class="drawer-backdrop" onclick="if(event.target===this) closeDrawer()">
+    <div class="drawer">
+      <div class="drawer-head">
+        <button class="modal-close" onclick="closeDrawer()">✕</button>
+      </div>
+      ${a.photo ? `<img src="${a.photo}" alt="${escapeHtml(a.name)||a.tagId}" style="width:100%;max-height:220px;object-fit:cover;border-radius:4px;margin-bottom:14px;border:1px solid var(--line-soft);">` : ''}
+      ${eartag(a)}
+      <div class="drawer-title">${escapeHtml(a.name) || a.tagId}</div>
+      <div class="drawer-sub">${a.klass} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${a.status}</div>
+
+      <div class="kv-grid">
+        <div class="kv"><div class="k">Date of birth</div><div class="v">${fmtDate(a.dob)}</div></div>
+        <div class="kv"><div class="k">Age</div><div class="v">${ageLabel(a.dob)}</div></div>
+        <div class="kv"><div class="k">Year letter</div><div class="v">${escapeHtml(a.yearLetter)||'—'}</div></div>
+        <div class="kv"><div class="k">Dam</div><div class="v">${dam? dam.tagId : (a.damId||'—')}</div></div>
+        <div class="kv"><div class="k">Sire</div><div class="v">${escapeHtml(a.sireId)||'—'}</div></div>
+        <div class="kv"><div class="k">Pasture</div><div class="v">${escapeHtml(a.pasture)||'—'}</div></div>
+        <div class="kv"><div class="k">Latest weight</div><div class="v">${latestWeight(a)? latestWeight(a).lbs+' lb':'—'}</div></div>
+        ${a.status==='sold' ? `<div class="kv"><div class="k">Sale price</div><div class="v">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</div></div>` : ''}
+      </div>
+      ${a.notes? `<div class="kv"><div class="k">Notes</div><div class="v" style="font-weight:400;">${escapeHtml(a.notes)}</div></div>`:''}
+
+      <div class="modal-actions" style="justify-content:flex-start; margin-top:16px;">
+        <button class="btn ghost sm" onclick="closeDrawer(); openAnimalModal(null,'${a.id}')">Edit</button>
+        <button class="btn ghost sm" onclick="closeDrawer(); openEventModal('${a.id}')">+ Log event</button>
+      </div>
+
+      ${calves.length>0 ? `<div class="drawer-section">
+        <h4>Offspring on record</h4>
+        ${calves.map(c=>`<div class="mini-row" style="cursor:pointer;" onclick="openDrawer('${c.id}')"><span class="t">${c.tagId}</span><span class="d">${fmtDate(c.dob)}</span></div>`).join('')}
+      </div>`:''}
+
+      <div class="drawer-section">
+        <h4>Weight history</h4>
+        ${weights.length===0? `<p class="hint">No weights recorded yet.</p>` :
+          weights.map(w=>`<div class="mini-row"><span class="t">${w.lbs} lb</span><span class="d">${fmtDate(w.date)}</span></div>`).join('')}
+      </div>
+
+      <div class="drawer-section">
+        <h4>Event history</h4>
+        ${events.length===0? `<p class="hint">No events logged yet.</p>` :
+          events.map(e=>`<div class="mini-row"><span class="t">${escapeHtml(e.type)}${e.vaccine? ' — '+escapeHtml(e.vaccine):''}${e.notes? ' — '+escapeHtml(e.notes):''}</span><span class="d">${fmtDate(e.date)}</span></div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('drawer-root').innerHTML = html;
+}
+
+/* =========================================================
+   GLOBAL SEARCH (available on every tab)
+========================================================= */
+function handleGlobalSearchInput(q){
+  const box = document.getElementById('global-search-results');
+  if(!box) return;
+  const query = (q||'').trim().toLowerCase();
+  if(!query){ box.style.display='none'; box.innerHTML=''; return; }
+  const matches = state.animals.filter(a=>{
+    return (a.tagId||'').toLowerCase().includes(query)
+      || (a.name||'').toLowerCase().includes(query)
+      || (a.breed||'').toLowerCase().includes(query);
+  }).slice(0,8);
+  if(matches.length===0){
+    box.innerHTML = `<div class="global-search-empty">No animals match "${escapeHtml(q)}"</div>`;
+  } else {
+    box.innerHTML = matches.map(a=>{
+      const canBreed = a.klass==='Cow' || a.klass==='Heifer';
+      return `<div class="global-search-row">
+        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer;" onclick="selectGlobalSearchResult('${a.id}')">
+          ${eartag(a)}
+          <span class="gs-meta">${a.name? escapeHtml(a.name)+' · ':''}${a.klass}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
+        </div>
+        ${a.status!=='active'? `<span class="status-tag">${a.status}</span>`:''}
+        ${canBreed ? `<button type="button" class="btn ghost sm" onclick="event.stopPropagation(); editBreedingFromSearch('${a.id}')">Breeding</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+  box.style.display = 'block';
+}
+function findBreedingRecordForAnimal(tagId){
+  const recs = state.breeding.filter(b=>b.cowTagId===tagId);
+  if(recs.length===0) return null;
+  const open = recs.find(b=>!b.actualCalvingDate);
+  if(open) return open;
+  return recs.slice().sort((x,y)=>(y.breedingDate||'').localeCompare(x.breedingDate||''))[0];
+}
+function editBreedingFromSearch(animalId){
+  const box = document.getElementById('global-search-results');
+  const input = document.getElementById('global-search-input');
+  if(box){ box.style.display='none'; box.innerHTML=''; }
+  if(input) input.value='';
+  const a = animalById(animalId);
+  if(!a) return;
+  const rec = findBreedingRecordForAnimal(a.tagId);
+  currentTab = 'breeding';
+  render();
+  if(rec) openBreedingModal(rec.id);
+  else openBreedingModal(null, a.tagId);
+}
+function selectGlobalSearchResult(id){
+  const box = document.getElementById('global-search-results');
+  const input = document.getElementById('global-search-input');
+  if(box){ box.style.display='none'; box.innerHTML=''; }
+  if(input) input.value='';
+  openDrawer(id);
+}
+document.addEventListener('click', function(e){
+  const wrap = document.getElementById('global-search-wrap');
+  const box = document.getElementById('global-search-results');
+  if(!wrap || !box) return;
+  if(!wrap.contains(e.target)){
+    box.style.display='none';
+  }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape'){
+    const box = document.getElementById('global-search-results');
+    if(box) box.style.display='none';
+  }
+});
+
+/* =========================================================
+   INIT
+========================================================= */
+async function init(){
+  render();
+  await loadState();
+  render();
+}
+init();
+</script>
+</body>
+</html>
