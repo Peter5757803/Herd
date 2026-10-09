@@ -1911,6 +1911,7 @@ function openDriveModal(){
       </div>
       <p class="hint" style="margin:8px 0 0;">Anyone with this code can read and change your herd data — only share it with your own devices or people you trust.</p>
     </div>
+    ${backupSectionHtml()}
     <div class="modal-actions">
       <button type="button" class="btn ghost" style="margin-right:auto; color:var(--danger);" onclick="disconnectDrive()">Disconnect</button>
       <button type="button" class="btn ghost" onclick="testDriveConnection()">Test connection</button>
@@ -1953,9 +1954,118 @@ function openDriveModal(){
         <button type="submit" class="btn rust">Connect</button>
       </div>
     </form>
+    ${backupSectionHtml()}
   `;
   document.getElementById('modal-root').innerHTML = modalShell('Google Drive sync', body);
 }
+/* ---------- Backup: export / import ----------
+   Moves a whole herd between copies of the app (e.g. from the github.io site
+   into the Workspace edition). Imports go through the normal save, so a
+   synced herd shares them with everyone. */
+let pendingImport = null;
+function herdCounts(d){
+  const n = (k, w)=>{ const c = (d[k]||[]).length; return c + ' ' + w + (c===1 ? '' : 's'); };
+  return [n('animals','animal'), n('events','health event'), n('breeding','breeding record'), n('pastures','pasture')].join(', ');
+}
+function backupSectionHtml(){
+  return `
+    <div class="field" style="border-top:1px solid var(--line-soft); padding-top:16px; margin-top:18px;">
+      <label style="margin-bottom:6px;">Move or back up your data</label>
+      <p class="hint" style="margin:0 0 10px;">This herd has <span id="backup-counts">${herdCounts(normalizeState(state))}</span>. <b>Export</b> saves it all to a backup file. <b>Import</b> loads a backup file into this herd. Use it to move data from one copy of Rangebook to another.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <button type="button" class="btn ghost sm" onclick="exportBackup()">⬇ Export backup file</button>
+        <button type="button" class="btn ghost sm" onclick="copyBackup()">Copy backup as text</button>
+      </div>
+      <p class="hint" style="margin:0 0 6px;">Import a backup file (from Export, or the <span class="mono">rangebook-herd-data.json</span> file in Google Drive):</p>
+      <input type="file" accept=".json,application/json,text/plain" onchange="handleBackupFile(event)">
+      <details style="margin-top:8px; font-size:12.5px; color:var(--ink-soft);">
+        <summary style="cursor:pointer;">Paste backup text instead</summary>
+        <textarea id="backup-paste" style="width:100%; margin-top:8px; font-size:11.5px;" class="mono" rows="4" placeholder="Paste the text from “Copy backup as text”"></textarea>
+        <button type="button" class="btn ghost sm" style="margin-top:6px;" onclick="loadPastedBackup()">Load pasted backup</button>
+      </details>
+      <div id="backup-preview"></div>
+    </div>`;
+}
+function backupPayload(){
+  return JSON.stringify({ app:'rangebook', format:1, exportedAt:new Date().toISOString(), data: normalizeState(state) });
+}
+function exportBackup(){
+  const blob = new Blob([backupPayload()], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rangebook-backup-' + todayStr() + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  toast('Backup downloaded — if nothing appeared, use “Copy backup as text”');
+}
+function copyBackup(){ copyText(backupPayload(), 'Backup copied — paste it into the other Rangebook'); }
+function parseBackup(text){
+  let obj;
+  try{ obj = JSON.parse(String(text||'').trim()); }catch(e){ return null; }
+  if(!obj || typeof obj!=='object') return null;
+  const data = (obj.app==='rangebook' && obj.data) ? obj.data : obj;
+  if(!['animals','events','breeding','pastures','breeds','vaccines'].some(k=>Array.isArray(data[k]))) return null;
+  return normalizeState(data);
+}
+function handleBackupFile(evt){
+  const file = evt.target.files && evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>previewImport(parseBackup(reader.result));
+  reader.onerror = ()=>previewImport(null);
+  reader.readAsText(file);
+}
+function loadPastedBackup(){
+  const el = document.getElementById('backup-paste');
+  previewImport(parseBackup(el ? el.value : ''));
+}
+function previewImport(data){
+  const box = document.getElementById('backup-preview');
+  if(!box) return;
+  pendingImport = data;
+  if(!data){
+    box.innerHTML = `<p class="hint" style="color:var(--danger); margin:10px 0 0;">That isn't a Rangebook backup. Use a file from “Export backup file” or the rangebook-herd-data.json file from Google Drive.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <div style="background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; margin-top:10px; font-size:12.5px;">
+      <div style="margin-bottom:8px;"><b>Backup contains:</b> ${herdCounts(data)}.</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn rust sm" onclick="applyImport('merge')">Add to current herd</button>
+        <button type="button" class="btn ghost sm" id="import-replace-btn" style="color:var(--danger);" onclick="applyImport('replace')">Replace current herd</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0;"><b>Add</b> keeps everything already here and brings in the backup's records (records that exist in both are updated from the backup). <b>Replace</b> makes this herd exactly match the backup.</p>
+    </div>`;
+}
+function applyImport(mode){
+  if(!pendingImport) return;
+  if(mode==='replace'){
+    const btn = document.getElementById('import-replace-btn');
+    // Two taps instead of confirm(): dialogs can be blocked when the app runs inside Google's frame.
+    if(btn && !btn.dataset.armed){
+      btn.dataset.armed = '1';
+      btn.textContent = 'Tap again to replace everything';
+      btn.classList.remove('ghost'); btn.classList.add('danger'); btn.style.color = '';
+      return;
+    }
+    applyLoadedState(pendingImport);
+  } else {
+    // Treat every backup record as a change made here, applied on top of the current herd.
+    applyLoadedState(mergeStates({}, pendingImport, state));
+  }
+  const summary = herdCounts(normalizeState(state));
+  pendingImport = null;
+  saveState();
+  render();
+  const countsEl = document.getElementById('backup-counts');
+  if(countsEl) countsEl.textContent = summary;
+  const box = document.getElementById('backup-preview');
+  if(box) box.innerHTML = `<p class="hint" style="color:var(--pasture-dark); margin:10px 0 0;"><b>Imported.</b> This herd now has ${summary}.${driveEnabled() ? ' Syncing to Google Drive…' : ''}</p>`;
+  toast(mode==='replace' ? 'Herd replaced from backup' : 'Backup added to herd');
+}
+
 // Catch the usual wrong-link mistakes before contacting Google.
 function driveUrlProblem(url){
   if(/\/dev(\?.*)?$/.test(url)) return `That's the <b>test (/dev)</b> link, which only works for you while signed in. Use the <b>Web app URL</b> from Deploy → Manage deployments — it ends in <span class="mono">/exec</span>.`;
@@ -1997,6 +2107,7 @@ function openWorkspaceDriveModal(){
       <label style="margin-bottom:6px;">Share with your crew</label>
       <p class="hint" style="margin:0;">Loading…</p>
     </div>
+    ${backupSectionHtml()}
     <div class="modal-actions">
       <button type="button" class="btn ghost" onclick="testDriveConnection()">Test connection</button>
       <button type="button" class="btn rust" onclick="closeModal()">Done</button>
