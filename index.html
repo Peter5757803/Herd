@@ -1593,7 +1593,7 @@ function viewHealth(){
             return `<tr onclick="${a?`openDrawer('${a.id}')`:''}">
               <td class="num-cell">${fmtDate(ev.date)}</td>
               <td>${a? eartag(a) : '<span class="muted">Unknown</span>'}</td>
-              <td>${escapeHtml(ev.type)}${ev.vaccine? `<div class="muted" style="font-size:11.5px;margin-top:2px;">${escapeHtml(ev.vaccine)}</div>`:''}</td>
+              <td>${escapeHtml(ev.type)}${ev.vaccine || ev.pregResult ? `<div class="muted" style="font-size:11.5px;margin-top:2px;">${escapeHtml(ev.vaccine || ev.pregResult)}</div>`:''}</td>
               <td class="muted">${escapeHtml(ev.notes||'—')}</td>
               <td class="num-cell">${ev.nextDue? fmtDate(ev.nextDue) : '—'}</td>
             </tr>`;
@@ -2693,9 +2693,17 @@ function openEventModal(presetAnimalId){
       ${groupBlock}
       <div class="field-row">
         <div class="field"><label>Event type *</label>
-          <select name="type" id="event-type-select" onchange="toggleCalvingFields(); toggleVaccineField(); enforceGroupCalvingRestriction();">${EVENT_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
+          <select name="type" id="event-type-select" onchange="toggleCalvingFields(); toggleVaccineField(); togglePregField(); enforceGroupCalvingRestriction();">${EVENT_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Date *</label><input type="date" name="date" required value="${todayStr()}"></div>
+      </div>
+      <div id="preg-field" style="display:none;" class="field">
+        <label>Result *</label>
+        <select name="pregResult">
+          <option value="Pregnant">Pregnant</option>
+          <option value="Open">Open</option>
+        </select>
+        <p class="hint">Pregnant sets the status to Active – Preg. Open sets an animal marked pregnant back to Active.</p>
       </div>
       <div id="vaccine-field" style="display:none;" class="field">
         <label>Vaccines</label>
@@ -2761,6 +2769,18 @@ function toggleCalvingFields(){
   if(!sel || !box) return;
   box.style.display = sel.value==='Calving' ? 'block' : 'none';
 }
+function togglePregField(){
+  const sel = document.getElementById('event-type-select');
+  const box = document.getElementById('preg-field');
+  if(!sel || !box) return;
+  box.style.display = sel.value==='Pregnancy Check' ? 'block' : 'none';
+}
+// A pregnancy check result updates the animal's status (only for animals still in the herd).
+function applyPregResult(a, result){
+  if(!a || !isActive(a)) return;
+  if(result==='Pregnant') a.status = 'active-preg';
+  else if(result==='Open' && a.status==='active-preg') a.status = 'active';
+}
 function toggleVaccineField(){
   const sel = document.getElementById('event-type-select');
   const box = document.getElementById('vaccine-field');
@@ -2783,8 +2803,11 @@ function saveEvent(evt){
     const nextDue = f.nextDue.value || null;
     const vaccines = type==='Vaccination' ? selectedVaccines(f) : [];
     const vaccine = vaccines.join(', ');
+    const pregResult = type==='Pregnancy Check' ? f.pregResult.value : '';
     checked.forEach(animalId=>{
-      state.events.push({ id: uid(), animalId, type, date, notes, nextDue, vaccine, vaccines: vaccines.slice() });
+      const ev = { id: uid(), animalId, type, date, notes, nextDue, vaccine, vaccines: vaccines.slice() };
+      if(pregResult){ ev.pregResult = pregResult; applyPregResult(animalById(animalId), pregResult); }
+      state.events.push(ev);
       if(type==='Weaning'){
         const a = animalById(animalId);
         if(a) a.weanDate = date;
@@ -2822,6 +2845,10 @@ function saveEvent(evt){
     vaccine: vaccines.join(', '),
     vaccines,
   };
+  if(ev.type==='Pregnancy Check'){
+    ev.pregResult = f.pregResult.value;
+    applyPregResult(animalById(ev.animalId), ev.pregResult);
+  }
   state.events.push(ev);
 
   const weight = f.weight.value;
@@ -2844,6 +2871,7 @@ function saveEvent(evt){
     if(cow && calfTagId){
       const rec = state.breeding.find(b=> b.cowTagId===cow.tagId && !b.actualCalvingDate);
       if(rec){ rec.actualCalvingDate = ev.date; rec.result = 'Bred'; rec.calfTagId = calfTagId; }
+      if(cow.status==='active-preg') cow.status = 'active';
       state.animals.push({
         id: uid(), tagId: calfTagId, name: '', klass: calfSex==='Bull' ? 'Bull Calf' : 'Heifer Calf',
         breed: cow.breed || '', dob: ev.date, yearLetter: '',
@@ -3103,7 +3131,7 @@ function openDrawer(id){
       <div class="drawer-section">
         <h4>Event history</h4>
         ${events.length===0? `<p class="hint">No events logged yet.</p>` :
-          events.map(e=>`<div class="mini-row"><span class="t">${escapeHtml(e.type)}${e.vaccine? ' — '+escapeHtml(e.vaccine):''}${e.notes? ' — '+escapeHtml(e.notes):''}</span><span class="d">${fmtDate(e.date)}</span></div>`).join('')}
+          events.map(e=>`<div class="mini-row"><span class="t">${escapeHtml(e.type)}${e.vaccine? ' — '+escapeHtml(e.vaccine):''}${e.pregResult? ' — '+escapeHtml(e.pregResult):''}${e.notes? ' — '+escapeHtml(e.notes):''}</span><span class="d">${fmtDate(e.date)}</span></div>`).join('')}
       </div>
     </div>
   </div>`;
