@@ -366,6 +366,8 @@
   }
   .checkbox-row:hover{ background:var(--surface-2); }
   .checkbox-row input{ flex-shrink:0; }
+  .field .checkbox-row{ display:flex; margin:0; font-size:13px; font-weight:400; text-transform:none; letter-spacing:normal; color:var(--ink); }
+  .field .checkbox-row input{ width:auto; }
   .checkbox-row.disabled{ opacity:0.5; cursor:not-allowed; }
   .checkbox-row.disabled:hover{ background:none; }
 
@@ -812,31 +814,24 @@ function ensureVaccineExists(name){
     state.vaccines.push(n);
   }
 }
-function vaccineOptionsHtml(selected){
-  const names = state.vaccines.slice();
-  if(selected && !names.some(n=>n.toLowerCase()===selected.toLowerCase())) names.push(selected);
-  names.sort((a,b)=>a.localeCompare(b));
-  let html = `<option value="">— Select vaccine —</option>`;
-  names.forEach(n=>{
-    html += `<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`;
-  });
-  html += `<option value="__add_new__">+ Add new vaccine…</option>`;
-  return html;
+function vaccineChecklistHtml(checkedNames){
+  const checked = new Set((checkedNames||[]).map(n=>n.toLowerCase()));
+  const names = state.vaccines.slice().sort((a,b)=>a.localeCompare(b));
+  if(names.length===0) return `<p class="hint" style="margin:4px 6px;">No vaccines in the library yet — add one below.</p>`;
+  return names.map(n=>`<label class="checkbox-row"><input type="checkbox" name="vaccines" value="${escapeHtml(n)}" ${checked.has(n.toLowerCase())?'checked':''}> ${escapeHtml(n)}</label>`).join('');
 }
-function handleVaccineSelectChange(selectEl){
-  if(selectEl.value === '__add_new__'){
-    const name = (prompt('Add a new vaccine (e.g. Bovi-Shield Gold, 7-way Blackleg):') || '').trim();
-    if(name){
-      ensureVaccineExists(name);
-      saveState();
-      selectEl.innerHTML = vaccineOptionsHtml(name);
-      selectEl.dataset.prev = name;
-    } else {
-      selectEl.value = selectEl.dataset.prev || '';
-    }
-  } else {
-    selectEl.dataset.prev = selectEl.value;
-  }
+function addVaccineFromEventForm(){
+  const name = (prompt('Add a new vaccine (e.g. Bovi-Shield Gold, 7-way Blackleg):') || '').trim();
+  if(!name) return;
+  const list = document.getElementById('vaccine-checklist');
+  const current = list ? Array.from(list.querySelectorAll('input[name="vaccines"]:checked')).map(cb=>cb.value) : [];
+  ensureVaccineExists(name);
+  saveState();
+  const canonical = state.vaccines.find(v=>v.toLowerCase()===name.toLowerCase()) || name;
+  if(list) list.innerHTML = vaccineChecklistHtml(current.concat(canonical));
+}
+function selectedVaccines(form){
+  return Array.from(form.querySelectorAll('input[name="vaccines"]:checked')).map(cb=>cb.value);
 }
 let vaccineChipCache = [];
 function renderVaccineChips(){
@@ -2148,8 +2143,9 @@ function openEventModal(presetAnimalId){
         <div class="field"><label>Date *</label><input type="date" name="date" required value="${todayStr()}"></div>
       </div>
       <div id="vaccine-field" style="display:none;" class="field">
-        <label>Vaccine</label>
-        <select name="vaccine" id="vaccine-select" onchange="handleVaccineSelectChange(this)">${vaccineOptionsHtml('')}</select>
+        <label>Vaccines</label>
+        <div class="checkbox-list" id="vaccine-checklist">${vaccineChecklistHtml([])}</div>
+        <button type="button" class="btn ghost sm" style="margin-top:8px;" onclick="addVaccineFromEventForm()">+ Add new vaccine</button>
       </div>
       <div id="calving-fields" style="display:none;">
         <div class="field-row">
@@ -2230,10 +2226,10 @@ function saveEvent(evt){
     const date = f.date.value;
     const notes = f.notes.value.trim();
     const nextDue = f.nextDue.value || null;
-    const vaccine = type==='Vaccination' && f.vaccine ? f.vaccine.value.trim() : '';
-    if(vaccine) ensureVaccineExists(vaccine);
+    const vaccines = type==='Vaccination' ? selectedVaccines(f) : [];
+    const vaccine = vaccines.join(', ');
     checked.forEach(animalId=>{
-      state.events.push({ id: uid(), animalId, type, date, notes, nextDue, vaccine });
+      state.events.push({ id: uid(), animalId, type, date, notes, nextDue, vaccine, vaccines: vaccines.slice() });
       if(type==='Weaning'){
         const a = animalById(animalId);
         if(a) a.weanDate = date;
@@ -2260,6 +2256,7 @@ function saveEvent(evt){
     if(animalByTag(calfTagId)){ toast('That tag ID is already in use'); return; }
   }
 
+  const vaccines = f.type.value==='Vaccination' ? selectedVaccines(f) : [];
   const ev = {
     id: uid(),
     animalId: f.animalId.value,
@@ -2267,9 +2264,9 @@ function saveEvent(evt){
     date: f.date.value,
     notes: f.notes.value.trim(),
     nextDue: f.nextDue.value || null,
-    vaccine: f.type.value==='Vaccination' && f.vaccine ? f.vaccine.value.trim() : '',
+    vaccine: vaccines.join(', '),
+    vaccines,
   };
-  if(ev.vaccine) ensureVaccineExists(ev.vaccine);
   state.events.push(ev);
 
   const weight = f.weight.value;
