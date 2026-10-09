@@ -2599,6 +2599,7 @@ const IMPORT_HEADER_MAP = {
   pasture:'pasture', location:'pasture', paddock:'pasture', field:'pasture', pen:'pasture', lot:'pasture', group:'pasture',
   notes:'notes', comments:'notes', comment:'notes', note:'notes', remarks:'notes',
   scrotal:'scrotalCm', sc:'scrotalCm', scrotalcircumference:'scrotalCm', scrotalcm:'scrotalCm', scrotalsize:'scrotalCm', sccm:'scrotalCm',
+  semencheckdate:'semenCheckDate', semendate:'semenCheckDate', bsedate:'semenCheckDate', sementestdate:'semenCheckDate', testedon:'semenCheckDate',
   semen:'semenCheck', semencheck:'semenCheck', sementest:'semenCheck', bse:'semenCheck', breedingsoundness:'semenCheck', semencheckresult:'semenCheck',
   purchaseprice:'purchasePrice', price:'purchasePrice', cost:'purchasePrice', boughtfor:'purchasePrice', paid:'purchasePrice',
   purchasedfrom:'purchasedFrom', breeder:'purchasedFrom', seller:'purchasedFrom', boughtfrom:'purchasedFrom', source:'purchasedFrom', bullbreeder:'purchasedFrom',
@@ -2650,7 +2651,7 @@ function parseDateFlexible(v){
 
 function openImportModal(){
   const body = `
-    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Every tab is read, and the header row can sit below a title. Columns can be in any order: <strong>RFID</strong> (required, also "EID", "Tag ID", "Tag #", "Animal ID"…), <strong>Name</strong>, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight. Any other columns are kept in Notes.</p>
+    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Every tab is read, and the header row can sit below a title. Columns can be in any order: <strong>RFID</strong> (required, also "EID", "Tag ID", "Tag #", "Animal ID"…), <strong>Name</strong>, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight — and for bulls: Scrotal (cm), Semen Check, Semen Check Date, Purchase Price, Purchased From, Purchase Date. Any other columns are kept in Notes.</p>
     <div class="field">
       <label>Spreadsheet file</label>
       <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" onchange="handleImportFile(event)">
@@ -2767,6 +2768,7 @@ function processImportRows(rows){
       sireId: String(rec.sireId||'').trim(),
       scrotalCm: rec.scrotalCm!==undefined && !isNaN(parseFloat(rec.scrotalCm)) ? parseFloat(rec.scrotalCm) : '',
       semenCheck: normalizeSemenCheck(rec.semenCheck),
+      semenCheckDate: parseDateFlexible(rec.semenCheckDate),
       purchasePrice: rec.purchasePrice!==undefined && !isNaN(parseFloat(String(rec.purchasePrice).replace(/[$,]/g,''))) ? parseFloat(String(rec.purchasePrice).replace(/[$,]/g,'')) : '',
       purchasedFrom: String(rec.purchasedFrom||'').trim(),
       purchaseDate: parseDateFlexible(rec.purchaseDate),
@@ -2839,7 +2841,18 @@ function renderImportPreview(){
 }
 
 // Spreadsheet column -> animal field, for overwriting an existing animal with only the cells that were filled in.
-const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes','scrotalCm','semenCheck','purchasePrice','purchasedFrom','purchaseDate'];
+const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes','scrotalCm','semenCheck','semenCheckDate','purchasePrice','purchasedFrom','purchaseDate'];
+// Dam/Sire cells may hold a name instead of an RFID; link them to that animal's RFID when the name is unique.
+function linkParentsByName(tags){
+  const unique = (list, name)=>{ const m = list.filter(x=> String(x.name||'').trim().toLowerCase()===name); return m.length===1 ? m[0] : null; };
+  const females = state.animals.filter(x=> x.klass==='Cow' || x.klass==='Heifer');
+  const bulls = state.animals.filter(x=> x.klass==='Bull');
+  state.animals.forEach(a=>{
+    if(!tags.has(a.tagId)) return;
+    if(a.damId && !animalByTag(a.damId)){ const d = unique(females, String(a.damId).trim().toLowerCase()); if(d) a.damId = d.tagId; }
+    if(a.sireId && !animalByTag(a.sireId)){ const b = unique(bulls, String(a.sireId).trim().toLowerCase()); if(b) a.sireId = b.tagId; }
+  });
+}
 function confirmImport(){
   const fresh = importRows.filter(r=>!r.issue && !r.inHerd);
   const dups = importRows.filter(r=>!r.issue && r.inHerd);
@@ -2870,11 +2883,12 @@ function confirmImport(){
     state.animals.push({
       id: uid(), tagId: r.tagId, name: r.name, klass: r.klass, breed: r.breed, dob: r.dob, yearLetter: r.yearLetter,
       damId: r.damId, sireId: r.sireId, status: r.status, pasture: r.pasture, notes: r.notes,
-      scrotalCm: r.scrotalCm, semenCheck: r.semenCheck,
+      scrotalCm: r.scrotalCm, semenCheck: r.semenCheck, semenCheckDate: r.semenCheckDate,
       purchasePrice: r.purchasePrice, purchasedFrom: r.purchasedFrom, purchaseDate: r.purchaseDate,
       weights, weanDate: null
     });
   });
+  linkParentsByName(new Set([...fresh, ...updates].map(r=>r.tagId)));
   saveState();
   closeModal();
   currentTab = 'animals';
@@ -2889,9 +2903,16 @@ function confirmImport(){
 
 function downloadImportTemplate(){
   if(typeof XLSX === 'undefined'){ toast("Spreadsheet tool didn't load — check your connection"); return; }
-  const headers = ['RFID','Name','Class','Breed','DOB','Year Letter','Dam','Sire','Status','Pasture','Notes'];
-  const example = ['982000123456789','Clover','Cow','Angus','2021-03-14','Y','','88','active','North 40','Easy calver'];
-  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+  // Bull-only columns (Scrotal … Purchase Date) can be left blank for cows, heifers and calves.
+  const headers = ['RFID','Name','Class','Breed','DOB','Year Letter','Dam','Sire','Status','Pasture','Weight','Notes',
+                   'Scrotal (cm)','Semen Check','Semen Check Date','Purchase Price','Purchased From','Purchase Date'];
+  const examples = [
+    ['982000123456789','Clover','Cow','Angus','2021-03-14','Y','','Duke','Active','North 40','1250','Easy calver', '','','','','',''],
+    ['982000987654321','Duke','Bull','Angus','2022-02-01','Z','','','Active','Bull Pasture','1950','', '38','Passed','2026-04-01','6500','Smith Angus Ranch','2023-03-15'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...examples]);
+  ws['!cols'] = headers.map(h=>({ wch: Math.max(12, h.length + 2) }));
+  ws['!cols'][0] = { wch: 18 };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Animals');
   XLSX.writeFile(wb, 'rangebook-import-template.xlsx');
