@@ -744,6 +744,7 @@ async function loadState(){
 }
 let saveTimer = null;
 function saveState(){
+  if(promoteHeifersWithCalves().length) render();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
     const json = JSON.stringify(state);
@@ -808,6 +809,22 @@ const STATUS_LABELS = { 'active':'Active', 'active-preg':'Active – Preg', 'sol
 // "Active – Preg" animals are still in the herd, so they count as active everywhere.
 function isActive(a){ return !!a && (a.status==='active' || a.status==='active-preg'); }
 function statusLabel(s){ return STATUS_LABELS[s] || s || '—'; }
+// Bred heifer: marked pregnant, or has a breeding record that isn't Open and hasn't calved yet.
+function isBredHeifer(a){
+  if(!a || a.klass!=='Heifer' || !isActive(a)) return false;
+  if(a.status==='active-preg') return true;
+  return state.breeding.some(b=> b.cowTagId===a.tagId && b.result!=='Open' && !b.actualCalvingDate);
+}
+// After her first calf a heifer is a cow: she's recorded as a calf's dam, or a breeding record shows she calved.
+function promoteHeifersWithCalves(){
+  const promoted = [];
+  state.animals.forEach(a=>{
+    if(a.klass!=='Heifer' || !a.tagId) return;
+    const hasCalf = state.animals.some(c=> c.damId===a.tagId) || state.breeding.some(b=> b.cowTagId===a.tagId && b.actualCalvingDate);
+    if(hasCalf){ a.klass = 'Cow'; promoted.push(a.tagId); }
+  });
+  return promoted;
+}
 function animalById(id){ return state.animals.find(a=>a.id===id); }
 function animalByTag(tag){ return state.animals.find(a=>a.tagId===tag); }
 function eartagClass(a){
@@ -1129,7 +1146,7 @@ function getUpcomingTasks(){
     const days = daysBetween(today, b.expectedCalvingDate);
     tasks.push({
       title: `Expected calving — ${b.cowTagId}`,
-      sub: cow.name ? cow.name : 'Cow',
+      sub: cow.name ? cow.name : (isBredHeifer(cow) ? 'Bred heifer' : cow.klass),
       date: b.expectedCalvingDate,
       days
     });
@@ -1149,7 +1166,8 @@ function viewDashboard(){
   const active = state.animals.filter(a=>isActive(a));
   const cows = active.filter(a=>a.klass==='Cow').length;
   const bulls = active.filter(a=>a.klass==='Bull').length;
-  const heifers = active.filter(a=>a.klass==='Heifer').length;
+  const bredHeifers = active.filter(isBredHeifer).length;
+  const heifers = active.filter(a=>a.klass==='Heifer').length - bredHeifers;
   const calves = active.filter(a=>a.klass==='Bull Calf' || a.klass==='Heifer Calf').length;
   const pairsCount = active.filter(a=>a.klass==='Cow').filter(cow => active.some(c=>c.damId===cow.tagId)).length;
 
@@ -1162,8 +1180,9 @@ function viewDashboard(){
     <div class="grid stat-grid">
       <div class="stat-card"><div class="num">${active.length}</div><div class="label">Head total</div></div>
       <div class="stat-card"><div class="num">${cows}</div><div class="label">Cows</div></div>
+      <div class="stat-card"><div class="num">${bredHeifers}</div><div class="label">Bred heifers</div></div>
       <div class="stat-card"><div class="num">${calves}</div><div class="label">Calves at side</div></div>
-      <div class="stat-card"><div class="num">${heifers}</div><div class="label">Heifers</div></div>
+      <div class="stat-card"><div class="num">${heifers}</div><div class="label">Open heifers</div></div>
       <div class="stat-card"><div class="num">${bulls}</div><div class="label">Bulls</div></div>
       <div class="stat-card ${overdueCount>0?'accent':''}"><div class="num">${overdueCount}</div><div class="label">Overdue tasks</div></div>
     </div>
@@ -2865,7 +2884,7 @@ function saveEvent(evt){
     const a = animalById(ev.animalId);
     if(a) a.weanDate = ev.date;
   }
-  let calfAdded = false;
+  let calfAdded = false, promotedHeifer = null;
   if(ev.type==='Calving'){
     const cow = animalById(ev.animalId);
     const calfTagId = f.calfTagId.value.trim();
@@ -2882,6 +2901,7 @@ function saveEvent(evt){
         weights: [], weanDate: null
       });
       calfAdded = true;
+      if(cow.klass==='Heifer') promotedHeifer = cow.tagId;
     }
   }
   if(ev.type==='Death / Loss'){
@@ -2895,7 +2915,7 @@ function saveEvent(evt){
   saveState();
   closeModal();
   render();
-  toast(calfAdded ? 'Event logged and calf added to the herd' : 'Event logged');
+  toast(calfAdded ? (promotedHeifer ? `Calf added — ${promotedHeifer} moved from Heifers to Cows` : 'Event logged and calf added to the herd') : 'Event logged');
 }
 
 /* ---------- Breeding modal ---------- */
@@ -3219,6 +3239,7 @@ async function init(){
   render();
   await connectFromLinkIfPresent();
   await loadState();
+  if(promoteHeifersWithCalves().length) saveState();
   render();
 }
 init();
