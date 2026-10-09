@@ -544,7 +544,20 @@ let driveStatus = 'idle'; // idle | connected | error | syncing
 let driveLastSync = null;
 
 function driveError(code, msg){ const e = new Error(msg || code); e.code = code; return e; }
+
+/* When the app is served by the Workspace script (HtmlService), Google provides
+   google.script.run: calls go straight to that script as the signed-in user,
+   with no web-app URL or secret involved. */
+const hostedInWorkspace = typeof google!=='undefined' && !!(google.script && google.script.run);
+function gasCall(fn, ...args){
+  return new Promise((resolve, reject)=>{
+    google.script.run.withSuccessHandler(resolve).withFailureHandler(err=>reject(driveError('script', err && err.message)))[fn](...args);
+  });
+}
+function driveEnabled(){ return hostedInWorkspace || !!(driveConfig && driveConfig.url); }
+
 async function driveFetchState(){
+  if(hostedInWorkspace) return JSON.parse((await gasCall('rbLoad')) || '{}');
   const sep = driveConfig.url.includes('?') ? '&' : '?';
   let res;
   // A web app that isn't shared with "Anyone" answers with a Google sign-in page, which the browser blocks as a network error.
@@ -561,6 +574,7 @@ async function driveFetchState(){
 // Version 2+ scripts merge saves on Google's side under a lock; older ones just overwrite.
 let driveScriptVersion = null;
 async function driveCheckVersion(){
+  if(hostedInWorkspace) return (driveScriptVersion = 2);
   try{
     const sep = driveConfig.url.includes('?') ? '&' : '?';
     const res = await fetch(driveConfig.url + sep + 'ping=1&secret=' + encodeURIComponent(driveConfig.secret||''));
@@ -570,6 +584,7 @@ async function driveCheckVersion(){
   return driveScriptVersion;
 }
 async function driveMergeSave(localJson, baseJson){
+  if(hostedInWorkspace) return gasCall('rbSave', localJson, baseJson);
   const res = await fetch(driveConfig.url, {
     method:'POST',
     headers:{ 'Content-Type':'text/plain;charset=utf-8' },
@@ -595,7 +610,7 @@ function refreshDriveStatusUI(){
   const dot = document.getElementById('drive-dot');
   if(!dot) return;
   dot.classList.remove('connected','error');
-  if(driveConfig && driveConfig.url){
+  if(driveEnabled()){
     if(driveStatus==='error') dot.classList.add('error');
     else dot.classList.add('connected');
   }
@@ -694,7 +709,7 @@ function driveSync(){
   return syncInFlight;
 }
 function pullFromDrive(){
-  if(!storageReady || !driveConfig || !driveConfig.url || document.hidden) return;
+  if(!storageReady || !driveEnabled() || document.hidden) return;
   driveSync().catch(()=>{ driveStatus = 'error'; refreshDriveStatusUI(); });
 }
 setInterval(pullFromDrive, 30000);
@@ -702,7 +717,7 @@ document.addEventListener('visibilitychange', pullFromDrive);
 window.addEventListener('focus', pullFromDrive);
 async function loadState(){
   try{
-    if(driveConfig && driveConfig.url){
+    if(driveEnabled()){
       const parsed = normalizeState(await driveFetchState());
       driveStatus = 'connected';
       applyLoadedState(parsed);
@@ -715,7 +730,7 @@ async function loadState(){
       if(raw) applyLoadedState(JSON.parse(raw));
     }
   }catch(e){
-    if(driveConfig && driveConfig.url){
+    if(driveEnabled()){
       driveStatus = 'error';
       toast("Couldn't reach Google Drive — showing the local copy");
       try{
@@ -734,13 +749,13 @@ function saveState(){
     const json = JSON.stringify(state);
     try{ localStorage.setItem('herd-data', json); }catch(e){}
     try{
-      if(driveConfig && driveConfig.url){
+      if(driveEnabled()){
         await driveSync();
       } else if(hasAppStorage){
         await window.storage.set('herd-data', json, false);
       }
     }catch(e){
-      if(driveConfig && driveConfig.url){
+      if(driveEnabled()){
         driveStatus = 'error';
         toast('Could not sync to Google Drive — saved locally, will retry next change');
       } else {
@@ -1633,6 +1648,36 @@ function modalShell(title, bodyHtml){
 
 /* ---------- Google Drive sync ---------- */
 const DRIVE_SCRIPT_VERSION = 2;
+// Merge logic shared by both Apps Script backends: replay one device's changes (base -> local) onto the current file.
+const GAS_MERGE_SRC = `const KEYS_ = {
+  animals: function (r) { return r.id; },
+  events: function (r) { return r.id; },
+  breeding: function (r) { return r.id; },
+  pastures: function (r) { return r.id; },
+  breeds: function (r) { return String((r && r.name) || r || '').toLowerCase(); },
+  vaccines: function (r) { return String(r).toLowerCase(); }
+};
+
+// Apply one device's changes (base -> local) on top of the current file.
+function merge_(base, local, current) {
+  const out = {};
+  Object.keys(KEYS_).forEach(function (name) {
+    const keyFn = KEYS_[name];
+    const key = function (r) { const k = keyFn(r); return (k === undefined || k === null || k === '') ? 'json:' + JSON.stringify(r) : String(k); };
+    const b = base[name] || [], l = local[name] || [], c = current[name] || [];
+    const baseMap = {}; b.forEach(function (r) { baseMap[key(r)] = JSON.stringify(r); });
+    const localKeys = {}; l.forEach(function (r) { localKeys[key(r)] = true; });
+    const order = [], result = {};
+    c.forEach(function (r) { const k = key(r); if (!(k in result)) order.push(k); result[k] = r; });
+    Object.keys(baseMap).forEach(function (k) { if (!localKeys[k]) delete result[k]; });
+    l.forEach(function (r) {
+      const k = key(r);
+      if (!(k in baseMap) || baseMap[k] !== JSON.stringify(r)) { if (!(k in result)) order.push(k); result[k] = r; }
+    });
+    out[name] = order.filter(function (k) { return k in result; }).map(function (k) { return result[k]; });
+  });
+  return out;
+}`;
 function driveScriptSource(secret){
   return `/**
  * Rangebook — Google Drive sync backend (version ${DRIVE_SCRIPT_VERSION}).
@@ -1666,36 +1711,7 @@ function parse_(text) {
   try { return JSON.parse(text || '{}') || {}; } catch (err) { return {}; }
 }
 
-const KEYS_ = {
-  animals: function (r) { return r.id; },
-  events: function (r) { return r.id; },
-  breeding: function (r) { return r.id; },
-  pastures: function (r) { return r.id; },
-  breeds: function (r) { return String((r && r.name) || r || '').toLowerCase(); },
-  vaccines: function (r) { return String(r).toLowerCase(); }
-};
-
-// Apply one device's changes (base -> local) on top of the current file.
-function merge_(base, local, current) {
-  const out = {};
-  Object.keys(KEYS_).forEach(function (name) {
-    const keyFn = KEYS_[name];
-    const key = function (r) { const k = keyFn(r); return (k === undefined || k === null || k === '') ? 'json:' + JSON.stringify(r) : String(k); };
-    const b = base[name] || [], l = local[name] || [], c = current[name] || [];
-    const baseMap = {}; b.forEach(function (r) { baseMap[key(r)] = JSON.stringify(r); });
-    const localKeys = {}; l.forEach(function (r) { localKeys[key(r)] = true; });
-    const order = [], result = {};
-    c.forEach(function (r) { const k = key(r); if (!(k in result)) order.push(k); result[k] = r; });
-    Object.keys(baseMap).forEach(function (k) { if (!localKeys[k]) delete result[k]; });
-    l.forEach(function (r) {
-      const k = key(r);
-      if (!(k in baseMap) || baseMap[k] !== JSON.stringify(r)) { if (!(k in result)) order.push(k); result[k] = r; }
-    });
-    out[name] = order.filter(function (k) { return k in result; }).map(function (k) { return result[k]; });
-  });
-  return out;
-}
-
+${GAS_MERGE_SRC}
 function doGet(e) {
   if (!e || !e.parameter || e.parameter.secret !== SECRET) return json_({ error: 'unauthorized' });
   if (e.parameter.ping) return json_({ rangebook: VERSION });
@@ -1725,6 +1741,82 @@ function doPost(e) {
 }
 `;
 }
+const DEFAULT_APP_URL = 'https://peter5757803.github.io/Herd/index.html';
+function workspaceScriptSource(){
+  const appUrl = /^https?:$/.test(location.protocol) && !hostedInWorkspace ? location.href.split('#')[0].split('?')[0] : DEFAULT_APP_URL;
+  return `/**
+ * Rangebook — Google Workspace edition.
+ * Serves the Rangebook app inside your Google Workspace and keeps the herd
+ * data in one file in this account's Drive. Everyone signs in with their
+ * own Google account; nobody outside your organization can open it.
+ *
+ * Setup: paste this into a new Apps Script project (script.new) while signed
+ * into your Workspace account, save, then Deploy > New deployment > Web app,
+ * Execute as "Me", Who has access "Anyone within <your domain>" > Deploy.
+ * Open the Web app URL — that's the link to bookmark and share with your crew.
+ *
+ * The app itself loads from APP_URL, so updates published there show up
+ * automatically. A copy is kept in Drive in case that site is unreachable.
+ */
+const APP_URL = ${JSON.stringify(appUrl)};
+const FILE_NAME = 'rangebook-herd-data.json';
+const APP_CACHE_NAME = 'rangebook-app-cache.html';
+
+function getOrCreate_(name, initial) {
+  const files = DriveApp.getFilesByName(name);
+  if (files.hasNext()) return files.next();
+  return DriveApp.createFile(name, initial, MimeType.PLAIN_TEXT);
+}
+
+function appHtml_() {
+  const props = PropertiesService.getScriptProperties();
+  try {
+    const res = UrlFetchApp.fetch(APP_URL, { muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) {
+      const html = res.getContentText();
+      const hash = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, html));
+      if (props.getProperty('appHash') !== hash) {
+        getOrCreate_(APP_CACHE_NAME, '').setContent(html);
+        props.setProperty('appHash', hash);
+      }
+      return html;
+    }
+  } catch (err) {}
+  return getOrCreate_(APP_CACHE_NAME, '<p>Rangebook could not be loaded. Try again in a minute.</p>').getBlob().getDataAsString();
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutput(appHtml_())
+    .setTitle('Rangebook — Herd Management')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+${GAS_MERGE_SRC}
+
+function rbLoad() {
+  return getOrCreate_(FILE_NAME, '{}').getBlob().getDataAsString();
+}
+
+function rbSave(localJson, baseJson) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const parse = function (t) { try { return JSON.parse(t || '{}') || {}; } catch (err) { return {}; } };
+    const file = getOrCreate_(FILE_NAME, '{}');
+    const merged = JSON.stringify(merge_(parse(baseJson), parse(localJson), parse(file.getBlob().getDataAsString())));
+    file.setContent(merged);
+    return merged;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function rbInfo() {
+  return { url: ScriptApp.getService().getUrl(), user: Session.getActiveUser().getEmail() };
+}
+`;
+}
+function copyWorkspaceScript(){ copyText(workspaceScriptSource(), 'Workspace script copied — paste it into a new Apps Script project'); }
 function pendingDriveSecret(){
   let secret = null;
   try{ secret = localStorage.getItem('herd-drive-pending-secret'); }catch(e){}
@@ -1776,6 +1868,7 @@ function copyDriveCode(){ copyText(encodeDriveCode(driveConfig), 'Connection cod
 function copyDriveLink(){ copyText(driveShareLink(), 'Link copied'); }
 
 function openDriveModal(){
+  if(hostedInWorkspace){ openWorkspaceDriveModal(); return; }
   const cfg = driveConfig || { url:'', secret:'' };
   const connected = !!cfg.url;
   const statusColor = driveStatus==='error' ? 'var(--danger)' : (connected ? 'var(--pasture)' : 'var(--ink-faint)');
@@ -1830,8 +1923,18 @@ function openDriveModal(){
         <label style="margin-bottom:6px;">Already set up on another device?</label>
         <p class="hint" style="margin:0;">Paste its connection code below and tap Connect.</p>
       </div>
+      <div class="field" style="background:var(--pasture-bg); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
+        <label style="margin-bottom:6px; color:var(--pasture-dark);">Google Workspace account (e.g. you@yourcompany.com)?</label>
+        <p class="hint" style="margin:0 0 6px; color:var(--ink-soft);">Run Rangebook inside your Workspace instead. Your crew signs in with their company Google accounts, with no codes or passwords to share.</p>
+        <ol style="${stepStyle}">
+          <li><button type="button" class="btn ghost sm" onclick="copyWorkspaceScript()">Copy Workspace script</button></li>
+          <li>Open <a href="https://script.new" target="_blank" rel="noopener" style="color:var(--rust); font-weight:600;">script.new</a> signed into your Workspace account, replace the code with the copied script, and save.</li>
+          <li>Deploy → New deployment → type <b>Web app</b> → Execute as <b>Me</b> → Who has access <b>Anyone within your organization</b> → Deploy, and allow access.</li>
+          <li>Open the <b>Web app URL</b> it gives you. Bookmark it and send it to your crew. That's your Rangebook from now on.</li>
+        </ol>
+      </div>
       <div class="field" style="background:var(--surface-2); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
-        <label style="margin-bottom:6px;">First time? One-time setup (~2 minutes)</label>
+        <label style="margin-bottom:6px;">Personal Google account? One-time setup (~2 minutes)</label>
         <ol style="${stepStyle}">
           <li><button type="button" class="btn ghost sm" onclick="copyDriveScript()">Copy script</button></li>
           <li>Open <a href="https://script.new" target="_blank" rel="noopener" style="color:var(--rust); font-weight:600;">script.new</a> (signed into the Google account to store data in), replace the code with the copied script, and save.</li>
@@ -1880,6 +1983,38 @@ const DRIVE_ERROR_HELP = {
   script: `<b>The script ran into an error.</b> Make sure you replaced <i>all</i> the code in the project with the copied script, saved, and deployed a new version.`,
   http: `<b>Google returned an error.</b> Wait a minute and try again. If it keeps happening, deploy a new version of the script.`,
 };
+function openWorkspaceDriveModal(){
+  const statusColor = driveStatus==='error' ? 'var(--danger)' : 'var(--pasture)';
+  const body = `
+    <div class="field" style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span style="width:9px;height:9px;border-radius:50%; background:${statusColor}; display:inline-block; flex-shrink:0;"></span>
+        <strong style="font-size:13.5px;">${driveStatus==='error' ? 'Running in Google Workspace — last sync failed' : 'Running in Google Workspace'}</strong>
+      </div>
+      <p class="hint" style="margin:0;">Herd data is saved to Google Drive and shared with everyone who opens this app's link.${driveLastSync ? ' Last synced '+driveLastSync.toLocaleTimeString()+'.' : ''}</p>
+    </div>
+    <div class="field" id="workspace-info" style="background:var(--surface-2); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
+      <label style="margin-bottom:6px;">Share with your crew</label>
+      <p class="hint" style="margin:0;">Loading…</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" onclick="testDriveConnection()">Test connection</button>
+      <button type="button" class="btn rust" onclick="closeModal()">Done</button>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = modalShell('Google Drive sync', body);
+  gasCall('rbInfo').then(info=>{
+    const el = document.getElementById('workspace-info');
+    if(!el) return;
+    el.innerHTML = `
+      <label style="margin-bottom:6px;">Share with your crew</label>
+      <p class="hint" style="margin:0 0 8px;">Send this link to anyone in your organization. They sign in with their own Google account.${info.user ? ' You are signed in as <b>'+escapeHtml(info.user)+'</b>.' : ''}</p>
+      <input type="text" readonly class="mono" style="width:100%; font-size:12px;" value="${escapeHtml(info.url)}" onfocus="this.select()">
+      <button type="button" class="btn ghost sm" style="margin-top:8px;" onclick="copyText(${escapeHtml(JSON.stringify(info.url))}, 'Link copied')">Copy link</button>`;
+  }).catch(()=>{
+    const el = document.getElementById('workspace-info');
+    if(el) el.innerHTML = `<label style="margin-bottom:6px;">Share with your crew</label><p class="hint" style="margin:0;">Send your crew the same link you used to open this app.</p>`;
+  });
+}
 function parseDriveInput(text, manualSecret){
   const fromCode = decodeDriveCode(text);
   if(fromCode) return fromCode;
