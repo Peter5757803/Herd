@@ -2732,6 +2732,8 @@ function openEventModal(presetAnimalId){
     </form>
   `;
   document.getElementById('modal-root').innerHTML = modalShell('Log health event', body);
+  // Show the fields for the type that's selected when the form opens (Vaccination by default).
+  toggleCalvingFields(); toggleVaccineField(); togglePregField();
 }
 function setEventMode(mode){
   const indivBtn = document.getElementById('event-mode-individual-btn');
