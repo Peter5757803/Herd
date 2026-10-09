@@ -1290,7 +1290,7 @@ function viewAnimals(){
             const w = latestWeight(a);
             return `<tr onclick="openDrawer('${a.id}')">
               <td onclick="event.stopPropagation()"><input type="checkbox" ${selectedAnimalIds.has(a.id)?'checked':''} onchange="toggleAnimalSelect('${a.id}', this.checked)"></td>
-              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}</div></div></td>
+              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}${semenBadge(a)}</div></div></td>
               <td class="num-cell">${a.yearLetter? escapeHtml(a.yearLetter) : '<span class="muted">—</span>'}</td>
               <td>${classLabel(a)}</td>
               <td>${breedBadge(a.breed)}</td>
@@ -2407,7 +2407,7 @@ function openAnimalModal(presetKlass, editId){
       </div>
       <div class="field-row">
         <div class="field"><label>Class *</label>
-          <select name="klass">${CLASSES.map(c=>`<option value="${c}" ${a.klass===c?'selected':''}>${c}</option>`).join('')}</select>
+          <select name="klass" id="animal-klass-select" onchange="toggleBullFields()">${CLASSES.map(c=>`<option value="${c}" ${a.klass===c?'selected':''}>${c}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Breed</label>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -2426,6 +2426,19 @@ function openAnimalModal(presetKlass, editId){
             <option value="sold" ${a.status==='sold'?'selected':''}>Sold</option>
             <option value="deceased" ${a.status==='deceased'?'selected':''}>Deceased</option>
           </select>
+        </div>
+      </div>
+      <div id="bull-fields" class="field" style="display:${a.klass==='Bull'?'block':'none'}; background:var(--surface-2); padding:12px 14px; border-radius:var(--radius);">
+        <label style="margin-bottom:10px;">Breeding soundness (bulls)</label>
+        <div class="field-row three" style="margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;"><label>Scrotal circumference (cm)</label><input type="number" name="scrotalCm" min="0" max="60" step="0.1" value="${escapeHtml(a.scrotalCm)}" placeholder="e.g. 36"></div>
+          <div class="field" style="margin-bottom:0;"><label>Semen check</label>
+            <input type="hidden" name="semenCheck" id="semen-check-input" value="${escapeHtml(a.semenCheck||'')}">
+            <div class="chip-toggle" id="semen-check-chips">
+              ${['Passed','Failed',''].map(v=>`<button type="button" class="chip ${(a.semenCheck||'')===v?'active':''}" data-value="${v}" onclick="setSemenCheck('${v}')">${v || 'Not tested'}</button>`).join('')}
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:0;"><label>Tested on</label><input type="date" name="semenCheckDate" value="${a.semenCheckDate||''}"></div>
         </div>
       </div>
       <div id="sale-price-field" class="field" style="display:${a.status==='sold'?'block':'none'};">
@@ -2463,6 +2476,20 @@ function sireRefFromInput(text){
   const bull = state.animals.find(x=> x.klass==='Bull' && displayName(x).toLowerCase()===t.toLowerCase()) || animalByTag(t);
   return bull ? bull.tagId : t;
 }
+function toggleBullFields(){
+  const sel = document.getElementById('animal-klass-select');
+  const box = document.getElementById('bull-fields');
+  if(sel && box) box.style.display = sel.value==='Bull' ? 'block' : 'none';
+}
+function setSemenCheck(v){
+  const input = document.getElementById('semen-check-input');
+  if(input) input.value = v;
+  document.querySelectorAll('#semen-check-chips .chip').forEach(b=> b.classList.toggle('active', b.dataset.value===v));
+}
+function semenBadge(a){
+  if(!a || a.klass!=='Bull' || !a.semenCheck) return '';
+  return a.semenCheck==='Passed' ? ` <span class="age-pill ok">Semen ✓</span>` : ` <span class="age-pill overdue">Semen ✗</span>`;
+}
 function toggleSalePriceField(){
   const sel = document.getElementById('animal-status-select');
   const box = document.getElementById('sale-price-field');
@@ -2488,6 +2515,11 @@ function saveAnimal(evt, id, editing){
     salePrice: f.status.value==='sold' && f.salePrice.value ? Number(f.salePrice.value) : '',
     photo: animalFormPhoto,
   };
+  // Breeding soundness only applies to bulls.
+  const isBull = rec.klass==='Bull';
+  rec.scrotalCm = isBull && f.scrotalCm.value!=='' ? Number(f.scrotalCm.value) : '';
+  rec.semenCheck = isBull ? f.semenCheck.value : '';
+  rec.semenCheckDate = isBull ? f.semenCheckDate.value : '';
   ensurePastureExists(rec.pasture);
   ensureBreedExists(rec.breed);
   if(editing){
@@ -2531,6 +2563,8 @@ const IMPORT_HEADER_MAP = {
   status:'status',
   pasture:'pasture', location:'pasture', paddock:'pasture', field:'pasture', pen:'pasture', lot:'pasture', group:'pasture',
   notes:'notes', comments:'notes', comment:'notes', note:'notes', remarks:'notes',
+  scrotal:'scrotalCm', sc:'scrotalCm', scrotalcircumference:'scrotalCm', scrotalcm:'scrotalCm', scrotalsize:'scrotalCm', sccm:'scrotalCm',
+  semen:'semenCheck', semencheck:'semenCheck', sementest:'semenCheck', bse:'semenCheck', breedingsoundness:'semenCheck', semencheckresult:'semenCheck',
   weight:'weight', currentweight:'weight', weightlb:'weight', weightlbs:'weight', wt:'weight', lbs:'weight', weightinlbs:'weight',
 };
 let importRows = [];
@@ -2550,6 +2584,13 @@ function normalizeClass(v){
   if(s.includes('calf')) return 'Heifer Calf';
   if(s==='f'||s==='female') return 'Cow';
   return 'Cow';
+}
+function normalizeSemenCheck(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(!s) return '';
+  if(/^(p|pass|passed|sat|satisfactory|yes|y|ok|good)\b/.test(s)) return 'Passed';
+  if(/^(f|fail|failed|unsat|unsatisfactory|no|n|bad)\b/.test(s)) return 'Failed';
+  return '';
 }
 function normalizeStatus(v){
   const s = String(v||'').trim().toLowerCase();
@@ -2686,6 +2727,8 @@ function processImportRows(rows){
       yearLetter: String(rec.yearLetter||'').trim().toUpperCase(),
       damId: String(rec.damId||'').trim(),
       sireId: String(rec.sireId||'').trim(),
+      scrotalCm: rec.scrotalCm!==undefined && !isNaN(parseFloat(rec.scrotalCm)) ? parseFloat(rec.scrotalCm) : '',
+      semenCheck: normalizeSemenCheck(rec.semenCheck),
       status: normalizeStatus(rec.status),
       pasture: String(rec.pasture||'').trim(),
       notes: String(rec.notes||'').trim(),
@@ -2755,7 +2798,7 @@ function renderImportPreview(){
 }
 
 // Spreadsheet column -> animal field, for overwriting an existing animal with only the cells that were filled in.
-const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes'];
+const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes','scrotalCm','semenCheck'];
 function confirmImport(){
   const fresh = importRows.filter(r=>!r.issue && !r.inHerd);
   const dups = importRows.filter(r=>!r.issue && r.inHerd);
@@ -2786,6 +2829,7 @@ function confirmImport(){
     state.animals.push({
       id: uid(), tagId: r.tagId, name: r.name, klass: r.klass, breed: r.breed, dob: r.dob, yearLetter: r.yearLetter,
       damId: r.damId, sireId: r.sireId, status: r.status, pasture: r.pasture, notes: r.notes,
+      scrotalCm: r.scrotalCm, semenCheck: r.semenCheck,
       weights, weanDate: null
     });
   });
@@ -3084,7 +3128,7 @@ function openBreedingModal(editId, presetCowTagId){
           const unavailable = !checked && bullUnavailable(bull.tagId);
           return `<label class="checkbox-row ${unavailable?'disabled':''}">
             <input type="checkbox" name="sireTagIds" value="${escapeHtml(bull.tagId)}" ${checked?'checked':''} ${unavailable?'disabled':''}>
-            ${eartag(bull)}
+            ${eartag(bull)}${semenBadge(bull)}
             ${unavailable? `<span class="muted" style="font-size:11px;">— already turned out</span>` : ''}
           </label>`;
         }).join('')}
@@ -3273,6 +3317,8 @@ function openDrawer(id){
         <div class="kv"><div class="k">Dam</div><div class="v">${dam? escapeHtml(displayName(dam)) : (a.damId ? 'Not in herd' : '—')}</div></div>
         <div class="kv"><div class="k">Sire</div><div class="v">${escapeHtml(nameForTag(a.sireId))}</div></div>
         <div class="kv"><div class="k">Pasture</div><div class="v">${escapeHtml(a.pasture)||'—'}</div></div>
+        ${a.klass==='Bull' ? `<div class="kv"><div class="k">Scrotal circ.</div><div class="v">${a.scrotalCm!==undefined && a.scrotalCm!=='' ? escapeHtml(a.scrotalCm)+' cm' : '—'}</div></div>
+        <div class="kv"><div class="k">Semen check</div><div class="v" style="color:${a.semenCheck==='Failed'?'var(--danger)':a.semenCheck==='Passed'?'var(--pasture-dark)':'inherit'};">${a.semenCheck ? escapeHtml(a.semenCheck)+(a.semenCheckDate? ' · '+fmtDate(a.semenCheckDate):'') : 'Not tested'}</div></div>` : ''}
         <div class="kv"><div class="k">Latest weight</div><div class="v">${latestWeight(a)? latestWeight(a).lbs+' lb':'—'}</div></div>
         ${a.status==='sold' ? `<div class="kv"><div class="k">Sale price</div><div class="v">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</div></div>` : ''}
       </div>
