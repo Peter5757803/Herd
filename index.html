@@ -478,7 +478,7 @@
       </div>
     </div>
     <div class="global-search-wrap" id="global-search-wrap">
-      <input type="text" id="global-search-input" class="search-input" style="width:100%;" placeholder="Search animals by tag, name, breed, or class…" autocomplete="off" oninput="handleGlobalSearchInput(this.value)" onfocus="handleGlobalSearchInput(this.value)">
+      <input type="text" id="global-search-input" class="search-input" style="width:100%;" placeholder="Search animals by name, RFID, breed, or class…" autocomplete="off" oninput="handleGlobalSearchInput(this.value)" onfocus="handleGlobalSearchInput(this.value)">
       <div id="global-search-results" class="global-search-results" style="display:none;"></div>
     </div>
     <div style="display:flex; gap:10px;">
@@ -838,8 +838,23 @@ function eartagClass(a){
   const map = { 'Cow':'cow','Bull':'bull','Heifer':'heifer','Steer':'steer','Bull Calf':'calf-bull','Heifer Calf':'calf-heifer' };
   return map[a.klass] || 'cow';
 }
+/* The RFID (stored as tagId) links animals together but is only shown when adding or editing
+   an animal. Everywhere else an animal is shown by name. */
+function displayName(a){
+  if(!a) return 'Unknown';
+  const n = String(a.name||'').trim();
+  if(n) return n;
+  return a.id ? 'Unnamed ' + classLabel(a).toLowerCase() : 'Not in herd';
+}
+// Name for an RFID reference (dam, sire, breeding record); free text such as "AI" is shown as typed.
+function nameForTag(ref){
+  if(!ref) return '—';
+  const a = animalByTag(ref);
+  return a ? displayName(a) : ref;
+}
+function byName(x, y){ return displayName(x).localeCompare(displayName(y), undefined, { numeric:true, sensitivity:'base' }); }
 function eartag(a){
-  return `<span class="eartag ${eartagClass(a)}">${escapeHtml(a.tagId||'—')}</span>`;
+  return `<span class="eartag ${eartagClass(a)}">${escapeHtml(displayName(a))}</span>`;
 }
 function escapeHtml(str){
   if(str===undefined || str===null) return '';
@@ -852,13 +867,13 @@ function latestWeight(a){
 function sireDisplay(b){
   const parts = [];
   if(b.sireTagIds && b.sireTagIds.length){
-    parts.push(b.sireTagIds.map(t=> eartag(animalByTag(t) || { tagId:t, klass:'Bull' })).join(' '));
+    parts.push(b.sireTagIds.map(t=> animalByTag(t) ? eartag(animalByTag(t)) : `<span class="muted">Not in herd</span>`).join(' '));
   }
   if(b.sireOther){
     parts.push(`<span class="muted" style="font-size:11.5px;">${escapeHtml(b.sireOther)}</span>`);
   }
   if(parts.length===0 && b.sireTagId){
-    parts.push(`<span class="mono">${escapeHtml(b.sireTagId)}</span>`);
+    parts.push(`<span>${escapeHtml(nameForTag(b.sireTagId))}</span>`);
   }
   return parts.length ? parts.join(' ') : '<span class="muted">—</span>';
 }
@@ -1037,7 +1052,7 @@ function getFilteredAnimals(){
     if(animalFilters.search && !animalMatchesSearch(a, animalFilters.search)) return false;
     return true;
   });
-  list.sort((a,b)=> (a.tagId||'').localeCompare(b.tagId||''));
+  list.sort(byName);
   return list;
 }
 function getPastureGroups(){
@@ -1126,7 +1141,7 @@ function getUpcomingTasks(){
       if(!a || !isActive(a)) return;
       const days = daysBetween(today, ev.nextDue);
       tasks.push({
-        title: `${ev.type} due — ${a.tagId}`,
+        title: `${ev.type} due — ${displayName(a)}`,
         sub: a.klass + (ev.notes ? ' · '+ev.notes : ''),
         date: ev.nextDue,
         days
@@ -1140,7 +1155,7 @@ function getUpcomingTasks(){
     if(age===null) return;
     const daysToTarget = WEAN_TARGET_DAYS - age;
     tasks.push({
-      title: `Wean ${a.tagId}`,
+      title: `Wean ${displayName(a)}`,
       sub: `Calf is ${ageLabel(a.dob)} old`,
       date: addDays(today, daysToTarget),
       days: daysToTarget
@@ -1153,8 +1168,8 @@ function getUpcomingTasks(){
     if(!cow || !isActive(cow)) return;
     const days = daysBetween(today, b.expectedCalvingDate);
     tasks.push({
-      title: `Expected calving — ${b.cowTagId}`,
-      sub: cow.name ? cow.name : (isBredHeifer(cow) ? 'Bred heifer' : cow.klass),
+      title: `Expected calving — ${displayName(cow)}`,
+      sub: isBredHeifer(cow) ? 'Bred heifer' : cow.klass,
       date: b.expectedCalvingDate,
       days
     });
@@ -1225,7 +1240,7 @@ function viewDashboard(){
           return `<div class="task-item">
             <div class="task-dot ok"></div>
             <div class="task-body">
-              <div class="task-title">${escapeHtml(ev.type)} — ${a? a.tagId : 'Unknown'}</div>
+              <div class="task-title">${escapeHtml(ev.type)} — ${escapeHtml(displayName(a))}</div>
               <div class="task-sub">${escapeHtml(ev.notes||'')}</div>
             </div>
             <div class="task-when ok">${fmtDate(ev.date)}</div>
@@ -1245,7 +1260,7 @@ function viewAnimals(){
 
   return `
     <div class="toolbar">
-      <input id="animal-search-input" class="search-input" type="text" placeholder="Search tag, name, breed, or class…" value="${escapeHtml(animalFilters.search)}" oninput="animalFilters.search=this.value; render();">
+      <input id="animal-search-input" class="search-input" type="text" placeholder="Search name, RFID, breed, or class…" value="${escapeHtml(animalFilters.search)}" oninput="animalFilters.search=this.value; render();">
       <select onchange="animalFilters.klass=this.value; render();">
         <option value="all" ${animalFilters.klass==='all'?'selected':''}>All classes</option>
         ${CLASSES.flatMap(c=> c==='Heifer' ? ['Heifer','Bred Heifer','Open Heifer'] : [c]).map(c=>`<option value="${c}" ${animalFilters.klass===c?'selected':''}>${c==='Heifer' ? 'Heifers (all)' : c}</option>`).join('')}
@@ -1268,20 +1283,20 @@ function viewAnimals(){
       <table class="ledger">
         <thead><tr>
           <th style="width:28px;"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAll(this.checked)"></th>
-          <th>Tag</th><th>Yr</th><th>Class</th><th>Breed</th><th>DOB</th><th>Age</th><th>Dam</th><th>Pasture</th><th>Weight</th>${animalFilters.status==='sold' ? '<th>Price</th>' : ''}
+          <th>Name</th><th>Yr</th><th>Class</th><th>Breed</th><th>DOB</th><th>Age</th><th>Dam</th><th>Pasture</th><th>Weight</th>${animalFilters.status==='sold' ? '<th>Price</th>' : ''}
         </tr></thead>
         <tbody>
           ${list.map(a=>{
             const w = latestWeight(a);
             return `<tr onclick="openDrawer('${a.id}')">
               <td onclick="event.stopPropagation()"><input type="checkbox" ${selectedAnimalIds.has(a.id)?'checked':''} onchange="toggleAnimalSelect('${a.id}', this.checked)"></td>
-              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}${a.name? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(a.name)}</div>`:''}</div></div></td>
+              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}</div></div></td>
               <td class="num-cell">${a.yearLetter? escapeHtml(a.yearLetter) : '<span class="muted">—</span>'}</td>
               <td>${classLabel(a)}</td>
               <td>${breedBadge(a.breed)}</td>
               <td class="num-cell">${fmtDate(a.dob)}</td>
               <td class="num-cell">${ageLabel(a.dob)}</td>
-              <td>${a.damId ? eartag(animalByTag(a.damId)||{tagId:a.damId,klass:'Cow'}) : '<span class="muted">—</span>'}</td>
+              <td>${a.damId ? (animalByTag(a.damId) ? eartag(animalByTag(a.damId)) : '<span class="muted">Not in herd</span>') : '<span class="muted">—</span>'}</td>
               <td>${escapeHtml(a.pasture)||'<span class="muted">—</span>'}</td>
               <td class="num-cell">${w? w.lbs+' lb' : '<span class="muted">—</span>'}</td>
               ${animalFilters.status==='sold' ? `<td class="num-cell">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString() : '<span class="muted">—</span>'}</td>` : ''}
@@ -1297,7 +1312,7 @@ function viewAnimals(){
    PAIRS
 ========================================================= */
 function viewPairs(){
-  const cows = state.animals.filter(a=>a.klass==='Cow' && isActive(a)).sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  const cows = state.animals.filter(a=>a.klass==='Cow' && isActive(a)).sort(byName);
   if(cows.length===0){
     return `<div class="empty-state"><div class="icon">🐮</div><h3>No cows on file yet</h3><p>Add a cow to start tracking pairs.</p><button class="btn rust" onclick="openAnimalModal('Cow')">+ Add a cow</button></div>`;
   }
@@ -1312,7 +1327,6 @@ function viewPairs(){
           <div class="cow-row">
             <div>
               ${eartag(cow)}
-              ${cow.name? `<span class="cow-name" style="margin-left:6px;">${escapeHtml(cow.name)}</span>`:''}
             </div>
             <button class="btn ghost sm" onclick="openDrawer('${cow.id}')">Details</button>
           </div>
@@ -1651,7 +1665,7 @@ function viewBreeding(){
             const cow = animalByTag(b.cowTagId);
             const days = daysBetween(todayStr(), b.expectedCalvingDate);
             return `<tr onclick="openBreedingModal('${b.id}')">
-              <td>${cow? eartag(cow): `<span class="mono">${escapeHtml(b.cowTagId)}</span>`}</td>
+              <td>${cow? eartag(cow): '<span class="muted">Not in herd</span>'}</td>
               <td>${b.method}</td>
               <td>${sireDisplay(b)}</td>
               <td class="num-cell">${fmtDate(b.breedingDate)}</td>
@@ -2382,8 +2396,8 @@ function openAnimalModal(presetKlass, editId){
         <button type="button" class="btn ghost sm" onclick="closeModal(); openImportModal();">Import .xlsx</button>
       </div>` : ''}
       <div class="field-row">
-        <div class="field"><label>Tag ID *</label><input type="text" name="tagId" required value="${escapeHtml(a.tagId)}" placeholder="e.g. 214"></div>
-        <div class="field"><label>Name (optional)</label><input type="text" name="name" value="${escapeHtml(a.name)}" placeholder="e.g. Clover"></div>
+        <div class="field"><label>Name *</label><input type="text" name="name" required value="${escapeHtml(a.name)}" placeholder="e.g. Clover"><p class="hint">Shown everywhere in the app.</p></div>
+        <div class="field"><label>RFID *</label><input type="text" name="tagId" required value="${escapeHtml(a.tagId)}" placeholder="e.g. 982 000123456789" autocomplete="off"><p class="hint">Only shown here, when adding or editing.</p></div>
       </div>
       <div class="field">
         <label>Photo</label>
@@ -2419,8 +2433,8 @@ function openAnimalModal(presetKlass, editId){
         <input type="number" name="salePrice" min="0" step="0.01" value="${escapeHtml(a.salePrice)}" placeholder="e.g. 1450">
       </div>
       <div class="field-row">
-        <div class="field"><label>Dam tag (if calf)</label><input type="text" name="damId" value="${escapeHtml(a.damId)}" placeholder="Mother's tag ID"></div>
-        <div class="field"><label>Sire</label><input type="text" name="sireId" value="${escapeHtml(a.sireId)}" placeholder="Tag or 'AI'"></div>
+        <div class="field"><label>Dam (if calf)</label><select name="damId">${damOptionsHtml(a.damId, a.tagId)}</select></div>
+        <div class="field"><label>Sire</label><input type="text" name="sireId" list="sire-options" value="${escapeHtml(nameForTag(a.sireId)==='—' ? '' : nameForTag(a.sireId))}" placeholder="Bull's name, or 'AI'"><datalist id="sire-options">${state.animals.filter(x=>x.klass==='Bull').sort(byName).map(x=>`<option value="${escapeHtml(displayName(x))}">`).join('')}</datalist></div>
       </div>
       <div class="field"><label>Pasture / location</label><input type="text" name="pasture" list="pasture-options-animal" value="${escapeHtml(a.pasture)}" placeholder="e.g. North 40">${pastureOptionsDatalist('pasture-options-animal')}</div>
       <div class="field"><label>Notes</label><textarea name="notes" placeholder="Temperament, markings, anything worth remembering">${escapeHtml(a.notes)}</textarea></div>
@@ -2433,6 +2447,21 @@ function openAnimalModal(presetKlass, editId){
   `;
   document.getElementById('modal-root').innerHTML = modalShell(editing? 'Edit animal':'Add animal', body);
   if(!editing) state._pendingAnimal = a;
+}
+// Dam picker by name; the value stored is the dam's RFID.
+function damOptionsHtml(selected, ownTag){
+  const dams = state.animals.filter(x=> (x.klass==='Cow' || x.klass==='Heifer') && x.tagId && x.tagId!==ownTag).sort(byName);
+  let html = `<option value="">— None —</option>`;
+  if(selected && !dams.some(d=>d.tagId===selected)) html += `<option value="${escapeHtml(selected)}" selected>Not in herd</option>`;
+  html += dams.map(d=>`<option value="${escapeHtml(d.tagId)}" ${d.tagId===selected?'selected':''}>${escapeHtml(displayName(d))}${isActive(d)?'':' ('+statusLabel(d.status)+')'}</option>`).join('');
+  return html;
+}
+// A sire typed by name is stored as that bull's RFID so it stays linked; anything else ("AI", an outside bull) is kept as typed.
+function sireRefFromInput(text){
+  const t = String(text||'').trim();
+  if(!t) return '';
+  const bull = state.animals.find(x=> x.klass==='Bull' && displayName(x).toLowerCase()===t.toLowerCase()) || animalByTag(t);
+  return bull ? bull.tagId : t;
 }
 function toggleSalePriceField(){
   const sel = document.getElementById('animal-status-select');
@@ -2453,7 +2482,7 @@ function saveAnimal(evt, id, editing){
     yearLetter: f.yearLetter.value.trim().toUpperCase(),
     status: f.status.value,
     damId: f.damId.value.trim(),
-    sireId: f.sireId.value.trim(),
+    sireId: sireRefFromInput(f.sireId.value),
     pasture: f.pasture.value.trim(),
     notes: f.notes.value.trim(),
     salePrice: f.status.value==='sold' && f.salePrice.value ? Number(f.salePrice.value) : '',
@@ -2487,6 +2516,7 @@ function deleteAnimal(id){
 
 /* ---------- Import from spreadsheet ---------- */
 const IMPORT_HEADER_MAP = {
+  rfid:'tagId', rfidtag:'tagId', rfidnumber:'tagId', rfidno:'tagId', rfidtagnumber:'tagId', eid:'tagId', eidtag:'tagId', electronicid:'tagId', electronicidnumber:'tagId',
   tagid:'tagId', tag:'tagId', tagnumber:'tagId', eartag:'tagId', eartagid:'tagId', id:'tagId',
   tagno:'tagId', tagnum:'tagId', eartagnumber:'tagId', eartagno:'tagId', animalid:'tagId', animalnumber:'tagId', animalno:'tagId',
   cow:'tagId', cowid:'tagId', cownumber:'tagId', cowno:'tagId', cowtag:'tagId', idnumber:'tagId', idno:'tagId',
@@ -2541,7 +2571,7 @@ function parseDateFlexible(v){
 
 function openImportModal(){
   const body = `
-    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Every tab is read, and the header row can sit below a title. Columns can be in any order: <strong>Tag ID</strong> (required, also "Tag #", "Ear Tag", "Animal ID"…), Name, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight. Any other columns are kept in Notes.</p>
+    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Every tab is read, and the header row can sit below a title. Columns can be in any order: <strong>RFID</strong> (required, also "EID", "Tag ID", "Tag #", "Animal ID"…), <strong>Name</strong>, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight. Any other columns are kept in Notes.</p>
     <div class="field">
       <label>Spreadsheet file</label>
       <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" onchange="handleImportFile(event)">
@@ -2577,7 +2607,7 @@ function handleImportFile(evt){
       importSheets = wb.SheetNames.map(name=>readImportSheet(name, wb.Sheets[name]));
       if(!importSheets.some(sh=>sh.rows.length)){
         const empty = importSheets.filter(sh=>!sh.headerFound).map(sh=>escapeHtml(sh.name)).join(', ');
-        previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't find a <b>Tag</b> column${empty? ' in '+empty : ''}. The sheet needs a header row with a column like "Tag ID", "Tag #", "Ear Tag" or "Animal ID".</p>`;
+        previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't find an <b>RFID</b> column${empty? ' in '+empty : ''}. The sheet needs a header row with a column like "RFID", "EID", "Tag ID" or "Animal ID".</p>`;
         return;
       }
       processImportRows(importSheets.filter(sh=>sh.include).flatMap(sh=>sh.rows));
@@ -2641,7 +2671,7 @@ function processImportRows(rows){
     if(!rec.status && /\b(bred|preg)/.test(classText)) rec.status = 'Active – Preg';
     const tagId = String(rec.tagId||'').trim();
     let issue = '';
-    if(!tagId) issue = 'Missing tag ID';
+    if(!tagId) issue = 'Missing RFID';
     else if(seenInFile.has(tagId)) issue = 'Duplicate in file';
     if(tagId) seenInFile.add(tagId);
     return {
@@ -2696,7 +2726,7 @@ function renderImportPreview(){
       <p style="margin:0 0 10px; font-size:13px;"><strong>${fresh.length}</strong> new${dups.length? `, <strong>${dups.length}</strong> already in your herd`:''}${invalid.length? `, <strong>${invalid.length}</strong> can't be imported`:''}.</p>
       ${dups.length ? `
       <div style="background:var(--tag-bg); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; margin-bottom:12px; font-size:12.5px;">
-        <div style="font-weight:700; margin-bottom:6px;">${dups.length} tag${dups.length===1?' is':'s are'} already in your herd (${dups.slice(0,6).map(r=>escapeHtml(r.tagId)).join(', ')}${dups.length>6?', …':''}). What should happen to ${dups.length===1?'it':'them'}?</div>
+        <div style="font-weight:700; margin-bottom:6px;">${dups.length} RFID${dups.length===1?' is':'s are'} already in your herd (${dups.slice(0,6).map(r=>escapeHtml(r.name || nameForTag(r.tagId))).join(', ')}${dups.length>6?', …':''}). What should happen to ${dups.length===1?'it':'them'}?</div>
         <div class="chip-toggle">
           <button type="button" class="chip ${importDupMode==='skip'?'active':''}" onclick="setImportDupMode('skip')">Skip — keep what's in the herd</button>
           <button type="button" class="chip ${importDupMode==='overwrite'?'active':''}" onclick="setImportDupMode('overwrite')">Overwrite with the spreadsheet</button>
@@ -2705,12 +2735,13 @@ function renderImportPreview(){
       </div>` : ''}
       <div style="max-height:220px; overflow-y:auto;">
         <table class="ledger import-table" style="font-size:12.5px;">
-          <thead><tr>${importSheets.length>1?'<th>Tab</th>':''}<th>Row</th><th>Tag</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
+          <thead><tr>${importSheets.length>1?'<th>Tab</th>':''}<th>Row</th><th>RFID</th><th>Name</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
           <tbody>
             ${importRows.map(r=>`<tr>
               ${importSheets.length>1?`<td class="muted">${escapeHtml(r.sheet||'')}</td>`:''}
               <td class="num-cell muted">${r.rowNum||''}</td>
-              <td>${escapeHtml(r.tagId)||'<span class="muted">—</span>'}</td>
+              <td class="mono" style="font-size:11.5px;">${escapeHtml(r.tagId)||'<span class="muted">—</span>'}</td>
+              <td>${escapeHtml(r.name)||'<span class="muted">—</span>'}</td>
               <td>${r.klass}</td>
               <td class="num-cell">${r.dob? fmtDate(r.dob) : '<span class="muted">—</span>'}</td>
               <td>${(st=>`<span class="status-tag" style="${st.bad?'color:var(--danger);':st.warn?'color:var(--tag-dark);':st.muted?'opacity:.6;':''}">${escapeHtml(st.label)}</span>`)(importRowState(r))}</td>
@@ -2772,8 +2803,8 @@ function confirmImport(){
 
 function downloadImportTemplate(){
   if(typeof XLSX === 'undefined'){ toast("Spreadsheet tool didn't load — check your connection"); return; }
-  const headers = ['Tag ID','Name','Class','Breed','DOB','Year Letter','Dam','Sire','Status','Pasture','Notes'];
-  const example = ['214','Clover','Cow','Angus','2021-03-14','Y','','88','active','North 40','Easy calver'];
+  const headers = ['RFID','Name','Class','Breed','DOB','Year Letter','Dam','Sire','Status','Pasture','Notes'];
+  const example = ['982000123456789','Clover','Cow','Angus','2021-03-14','Y','','88','active','North 40','Easy calver'];
   const ws = XLSX.utils.aoa_to_sheet([headers, example]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Animals');
@@ -2782,7 +2813,7 @@ function downloadImportTemplate(){
 
 /* ---------- Event modal ---------- */
 function openEventModal(presetAnimalId){
-  const activeAnimals = state.animals.filter(a=>isActive(a)).sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  const activeAnimals = state.animals.filter(a=>isActive(a)).sort(byName);
   if(activeAnimals.length===0){
     toast('Add an animal first');
     return;
@@ -2792,7 +2823,7 @@ function openEventModal(presetAnimalId){
     <div class="field" id="individual-animal-block">
       <label>Animal *</label>
       <select name="animalId" id="event-animal-select" required>
-        ${activeAnimals.map(a=>`<option value="${a.id}" ${presetAnimalId===a.id?'selected':''}>${a.tagId} — ${a.klass}${a.name? ' ('+a.name+')':''}</option>`).join('')}
+        ${activeAnimals.map(a=>`<option value="${a.id}" ${presetAnimalId===a.id?'selected':''}>${escapeHtml(displayName(a))} — ${classLabel(a)}</option>`).join('')}
       </select>
     </div>`;
   const groupBlock = presetAnimalId ? '' : `
@@ -2845,7 +2876,9 @@ function openEventModal(presetAnimalId){
               <option value="Bull">Bull</option>
             </select>
           </div>
-          <div class="field"><label>Calf tag ID *</label><input type="text" name="calfTagId" placeholder="e.g. 512"></div>
+          <div class="field"><label>Calf RFID *</label><input type="text" name="calfTagId" placeholder="e.g. 982 000123456789" autocomplete="off"></div>
+        </div>
+        <div class="field"><label>Calf name *</label><input type="text" name="calfName" placeholder="e.g. Clover's 2026 calf">
         </div>
         <p class="hint" style="margin-top:-6px; margin-bottom:14px;">We'll add the calf to your herd automatically, paired to this dam.</p>
       </div>
@@ -2959,8 +2992,9 @@ function saveEvent(evt){
 
   if(f.type.value === 'Calving'){
     const calfTagId = f.calfTagId.value.trim();
-    if(!calfTagId){ toast('Enter a tag ID for the calf'); return; }
-    if(animalByTag(calfTagId)){ toast('That tag ID is already in use'); return; }
+    if(!calfTagId){ toast('Enter the calf\'s RFID'); return; }
+    if(!f.calfName.value.trim()){ toast('Enter a name for the calf'); return; }
+    if(animalByTag(calfTagId)){ toast('That RFID is already in use'); return; }
   }
 
   const vaccines = f.type.value==='Vaccination' ? selectedVaccines(f) : [];
@@ -3002,14 +3036,14 @@ function saveEvent(evt){
       if(rec){ rec.actualCalvingDate = ev.date; rec.result = 'Bred'; rec.calfTagId = calfTagId; }
       if(cow.status==='active-preg') cow.status = 'active';
       state.animals.push({
-        id: uid(), tagId: calfTagId, name: '', klass: calfSex==='Bull' ? 'Bull Calf' : 'Heifer Calf',
+        id: uid(), tagId: calfTagId, name: f.calfName.value.trim(), klass: calfSex==='Bull' ? 'Bull Calf' : 'Heifer Calf',
         breed: cow.breed || '', dob: ev.date, yearLetter: '',
         damId: cow.tagId, sireId: rec ? (rec.sireTagId||'') : '',
         status: 'active', pasture: cow.pasture || '', notes: '',
         weights: [], weanDate: null
       });
       calfAdded = true;
-      if(cow.klass==='Heifer') promotedHeifer = cow.tagId;
+      if(cow.klass==='Heifer') promotedHeifer = displayName(cow);
     }
   }
   if(ev.type==='Death / Loss'){
@@ -3030,8 +3064,8 @@ function saveEvent(evt){
 function openBreedingModal(editId, presetCowTagId){
   const editing = editId ? state.breeding.find(b=>b.id===editId) : null;
   const b = editing || { id:uid(), cowTagId:presetCowTagId||'', method:'Natural', sireTagIds:[], sireOther:'', sireTagId:'', breedingDate:todayStr(), result:'Pending', actualCalvingDate:'', calfTagId:'' };
-  const cows = state.animals.filter(a=>isActive(a) && (a.klass==='Cow' || a.klass==='Heifer')).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
-  const activeBulls = state.animals.filter(a=>a.klass==='Bull' && isActive(a)).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
+  const cows = state.animals.filter(a=>isActive(a) && (a.klass==='Cow' || a.klass==='Heifer')).sort(byName);
+  const activeBulls = state.animals.filter(a=>a.klass==='Bull' && isActive(a)).sort(byName);
   const preSelectedBulls = new Set(b.sireTagIds || []);
   let otherValue = b.sireOther || '';
   if((!b.sireTagIds || b.sireTagIds.length===0) && !otherValue && b.sireTagId){
@@ -3050,7 +3084,7 @@ function openBreedingModal(editId, presetCowTagId){
           const unavailable = !checked && bullUnavailable(bull.tagId);
           return `<label class="checkbox-row ${unavailable?'disabled':''}">
             <input type="checkbox" name="sireTagIds" value="${escapeHtml(bull.tagId)}" ${checked?'checked':''} ${unavailable?'disabled':''}>
-            ${eartag(bull)}${bull.name? ' '+escapeHtml(bull.name):''}
+            ${eartag(bull)}
             ${unavailable? `<span class="muted" style="font-size:11px;">— already turned out</span>` : ''}
           </label>`;
         }).join('')}
@@ -3058,9 +3092,12 @@ function openBreedingModal(editId, presetCowTagId){
 
   const individualBlock = `
     <div class="field" id="individual-cow-block">
-      <label>Cow / heifer tag *</label>
-      <input list="cow-list" type="text" name="cowTagId" id="cowTagId-input" required value="${escapeHtml(b.cowTagId)}" placeholder="Tag ID">
-      <datalist id="cow-list">${cows.map(c=>`<option value="${c.tagId}">`).join('')}</datalist>
+      <label>Cow / heifer *</label>
+      <select name="cowTagId" id="cowTagId-input" required>
+        <option value="">— Select —</option>
+        ${b.cowTagId && !cows.some(c=>c.tagId===b.cowTagId) ? `<option value="${escapeHtml(b.cowTagId)}" selected>Not in herd</option>` : ''}
+        ${cows.map(c=>`<option value="${escapeHtml(c.tagId)}" ${c.tagId===b.cowTagId?'selected':''}>${escapeHtml(displayName(c))} — ${classLabel(c)}</option>`).join('')}
+      </select>
     </div>`;
 
   const groupBlock = editing ? '' : `
@@ -3072,7 +3109,7 @@ function openBreedingModal(editId, presetCowTagId){
       </select>
       <div class="checkbox-list" id="group-cow-checklist">
         ${cows.length===0 ? `<p class="hint" style="margin:4px;">No active cows or heifers on file yet.</p>` :
-        cows.map(c=>`<label class="checkbox-row"><input type="checkbox" name="groupCowTagIds" value="${escapeHtml(c.tagId)}" data-pasture="${escapeHtml(c.pasture||'')}"> ${eartag(c)}${c.name? ' '+escapeHtml(c.name):''}${c.pasture? ` <span class="muted" style="font-size:11px;">— ${escapeHtml(c.pasture)}</span>`:''}</label>`).join('')}
+        cows.map(c=>`<label class="checkbox-row"><input type="checkbox" name="groupCowTagIds" value="${escapeHtml(c.tagId)}" data-pasture="${escapeHtml(c.pasture||'')}"> ${eartag(c)}${c.pasture? ` <span class="muted" style="font-size:11px;">— ${escapeHtml(c.pasture)}</span>`:''}</label>`).join('')}
       </div>
     </div>`;
 
@@ -3087,8 +3124,8 @@ function openBreedingModal(editId, presetCowTagId){
         </div>
         <div class="field"><label>Actual calving date</label><input type="date" name="actualCalvingDate" value="${b.actualCalvingDate||''}"></div>
       </div>
-      <div class="field"><label>Calf tag (if born)</label><input type="text" name="calfTagId" value="${escapeHtml(b.calfTagId)}" placeholder="Tag ID assigned to the calf"></div>` : `
-      <p class="hint">Pregnancy check, calving, and calf tag are tracked per animal — you'll set those from each record once added.</p>`;
+      <div class="field"><label>Calf RFID (if born)</label><input type="text" name="calfTagId" value="${escapeHtml(b.calfTagId)}" placeholder="RFID assigned to the calf" autocomplete="off"></div>` : `
+      <p class="hint">Pregnancy check, calving, and calf RFID are tracked per animal — you'll set those from each record once added.</p>`;
 
   const body = `
     <form onsubmit="saveBreeding(event, '${b.id}', ${editing?'true':'false'})">
@@ -3225,17 +3262,16 @@ function openDrawer(id){
       <div class="drawer-head">
         <button class="modal-close" onclick="closeDrawer()">✕</button>
       </div>
-      ${a.photo ? `<img src="${a.photo}" alt="${escapeHtml(a.name)||a.tagId}" style="width:100%;max-height:220px;object-fit:cover;border-radius:4px;margin-bottom:14px;border:1px solid var(--line-soft);">` : ''}
-      ${eartag(a)}
-      <div class="drawer-title">${escapeHtml(a.name) || a.tagId}</div>
+      ${a.photo ? `<img src="${a.photo}" alt="${escapeHtml(displayName(a))}" style="width:100%;max-height:220px;object-fit:cover;border-radius:4px;margin-bottom:14px;border:1px solid var(--line-soft);">` : ''}
+      <div class="drawer-title">${escapeHtml(displayName(a))}</div>
       <div class="drawer-sub">${classLabel(a)} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${statusLabel(a.status)}</div>
 
       <div class="kv-grid">
         <div class="kv"><div class="k">Date of birth</div><div class="v">${fmtDate(a.dob)}</div></div>
         <div class="kv"><div class="k">Age</div><div class="v">${ageLabel(a.dob)}</div></div>
         <div class="kv"><div class="k">Year letter</div><div class="v">${escapeHtml(a.yearLetter)||'—'}</div></div>
-        <div class="kv"><div class="k">Dam</div><div class="v">${dam? dam.tagId : (a.damId||'—')}</div></div>
-        <div class="kv"><div class="k">Sire</div><div class="v">${escapeHtml(a.sireId)||'—'}</div></div>
+        <div class="kv"><div class="k">Dam</div><div class="v">${dam? escapeHtml(displayName(dam)) : (a.damId ? 'Not in herd' : '—')}</div></div>
+        <div class="kv"><div class="k">Sire</div><div class="v">${escapeHtml(nameForTag(a.sireId))}</div></div>
         <div class="kv"><div class="k">Pasture</div><div class="v">${escapeHtml(a.pasture)||'—'}</div></div>
         <div class="kv"><div class="k">Latest weight</div><div class="v">${latestWeight(a)? latestWeight(a).lbs+' lb':'—'}</div></div>
         ${a.status==='sold' ? `<div class="kv"><div class="k">Sale price</div><div class="v">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</div></div>` : ''}
@@ -3249,7 +3285,7 @@ function openDrawer(id){
 
       ${calves.length>0 ? `<div class="drawer-section">
         <h4>Offspring on record</h4>
-        ${calves.map(c=>`<div class="mini-row" style="cursor:pointer;" onclick="openDrawer('${c.id}')"><span class="t">${c.tagId}</span><span class="d">${fmtDate(c.dob)}</span></div>`).join('')}
+        ${calves.map(c=>`<div class="mini-row" style="cursor:pointer;" onclick="openDrawer('${c.id}')"><span class="t">${escapeHtml(displayName(c))}</span><span class="d">${fmtDate(c.dob)}</span></div>`).join('')}
       </div>`:''}
 
       <div class="drawer-section">
@@ -3285,7 +3321,7 @@ function handleGlobalSearchInput(q){
       return `<div class="global-search-row">
         <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer;" onclick="selectGlobalSearchResult('${a.id}')">
           ${eartag(a)}
-          <span class="gs-meta">${a.name? escapeHtml(a.name)+' · ':''}${classLabel(a)}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
+          <span class="gs-meta">${classLabel(a)}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
         </div>
         ${a.status!=="active"? `<span class="status-tag">${statusLabel(a.status)}</span>`:''}
         ${canBreed ? `<button type="button" class="btn ghost sm" onclick="event.stopPropagation(); editBreedingFromSearch('${a.id}')">Breeding</button>` : ''}
