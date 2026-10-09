@@ -2551,6 +2551,7 @@ function openImportModal(){
     </div>
   `;
   importRows = [];
+  importDupMode = null;
   document.getElementById('modal-root').innerHTML = modalShell('Import animals from spreadsheet', body);
 }
 
@@ -2585,9 +2586,12 @@ function handleImportFile(evt){
   reader.readAsArrayBuffer(file);
 }
 
+// What to do with spreadsheet rows whose tag is already in the herd: null (not chosen yet), 'skip' or 'overwrite'.
+let importDupMode = null;
 function processImportRows(rows){
   const existingTags = new Set(state.animals.map(a=>a.tagId));
   const seenInFile = new Set();
+  importDupMode = null;
   importRows = rows.map(row=>{
     const rec = {};
     Object.keys(row).forEach(h=>{
@@ -2597,10 +2601,11 @@ function processImportRows(rows){
     const tagId = String(rec.tagId||'').trim();
     let issue = '';
     if(!tagId) issue = 'Missing tag ID';
-    else if(existingTags.has(tagId)) issue = 'Already in herd';
     else if(seenInFile.has(tagId)) issue = 'Duplicate in file';
     if(tagId) seenInFile.add(tagId);
     return {
+      inHerd: !issue && existingTags.has(tagId),
+      provided: Object.keys(rec),
       tagId,
       name: String(rec.name||'').trim(),
       klass: normalizeClass(rec.klass),
@@ -2619,15 +2624,37 @@ function processImportRows(rows){
   renderImportPreview();
 }
 
+function setImportDupMode(mode){ importDupMode = mode; renderImportPreview(); }
+function importRowState(r){
+  if(r.issue) return { label: r.issue, bad: true };
+  if(!r.inHerd) return { label: 'New' };
+  if(importDupMode==='overwrite') return { label: 'Will update' };
+  if(importDupMode==='skip') return { label: 'Will skip', muted: true };
+  return { label: 'Already in herd', warn: true };
+}
 function renderImportPreview(){
-  const valid = importRows.filter(r=>!r.issue);
+  const fresh = importRows.filter(r=>!r.issue && !r.inHerd);
+  const dups = importRows.filter(r=>!r.issue && r.inHerd);
   const invalid = importRows.filter(r=>r.issue);
   const el = document.getElementById('import-preview');
   const btn = document.getElementById('import-confirm-btn');
-  if(btn) btn.disabled = valid.length===0;
+  const willWrite = fresh.length + (importDupMode==='overwrite' ? dups.length : 0);
+  if(btn){
+    btn.disabled = (dups.length>0 && !importDupMode) || willWrite===0;
+    btn.textContent = dups.length>0 && !importDupMode ? 'Choose skip or overwrite' : 'Import';
+  }
   el.innerHTML = `
     <div class="panel" style="margin:14px 0 0; padding:14px 16px;">
-      <p style="margin:0 0 10px; font-size:13px;"><strong>${valid.length}</strong> ready to import${invalid.length? `, <strong>${invalid.length}</strong> skipped`:''}.</p>
+      <p style="margin:0 0 10px; font-size:13px;"><strong>${fresh.length}</strong> new${dups.length? `, <strong>${dups.length}</strong> already in your herd`:''}${invalid.length? `, <strong>${invalid.length}</strong> can't be imported`:''}.</p>
+      ${dups.length ? `
+      <div style="background:var(--tag-bg); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; margin-bottom:12px; font-size:12.5px;">
+        <div style="font-weight:700; margin-bottom:6px;">${dups.length} tag${dups.length===1?' is':'s are'} already in your herd (${dups.slice(0,6).map(r=>escapeHtml(r.tagId)).join(', ')}${dups.length>6?', …':''}). What should happen to ${dups.length===1?'it':'them'}?</div>
+        <div class="chip-toggle">
+          <button type="button" class="chip ${importDupMode==='skip'?'active':''}" onclick="setImportDupMode('skip')">Skip — keep what's in the herd</button>
+          <button type="button" class="chip ${importDupMode==='overwrite'?'active':''}" onclick="setImportDupMode('overwrite')">Overwrite with the spreadsheet</button>
+        </div>
+        <p class="hint" style="margin:6px 0 0;">Overwrite only changes columns that have a value in the spreadsheet. Blank cells, photos, weight history and events are kept.</p>
+      </div>` : ''}
       <div style="max-height:220px; overflow-y:auto;">
         <table class="ledger import-table" style="font-size:12.5px;">
           <thead><tr><th>Tag</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
@@ -2636,7 +2663,7 @@ function renderImportPreview(){
               <td>${escapeHtml(r.tagId)||'<span class="muted">—</span>'}</td>
               <td>${r.klass}</td>
               <td class="num-cell">${r.dob? fmtDate(r.dob) : '<span class="muted">—</span>'}</td>
-              <td>${r.issue? `<span class="status-tag" style="color:var(--danger);">${escapeHtml(r.issue)}</span>` : '<span class="status-tag">Ready</span>'}</td>
+              <td>${(st=>`<span class="status-tag" style="${st.bad?'color:var(--danger);':st.warn?'color:var(--tag-dark);':st.muted?'opacity:.6;':''}">${escapeHtml(st.label)}</span>`)(importRowState(r))}</td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -2646,10 +2673,28 @@ function renderImportPreview(){
   `;
 }
 
+// Spreadsheet column -> animal field, for overwriting an existing animal with only the cells that were filled in.
+const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes'];
 function confirmImport(){
-  const valid = importRows.filter(r=>!r.issue);
-  if(valid.length===0) return;
-  valid.forEach(r=>{
+  const fresh = importRows.filter(r=>!r.issue && !r.inHerd);
+  const dups = importRows.filter(r=>!r.issue && r.inHerd);
+  if(dups.length && !importDupMode) return;
+  const updates = importDupMode==='overwrite' ? dups : [];
+  if(fresh.length + updates.length === 0) return;
+  updates.forEach(r=>{
+    const a = animalByTag(r.tagId);
+    if(!a) return;
+    IMPORT_OVERWRITE_FIELDS.forEach(k=>{ if(r.provided.includes(k)) a[k] = r[k]; });
+    const w = Number(r.weight);
+    if(r.provided.includes('weight') && !isNaN(w) && w>0){
+      const date = r.dob || todayStr();
+      a.weights = a.weights || [];
+      if(!a.weights.some(x=>x.date===date && x.lbs===w)) a.weights.push({ date, lbs: w });
+    }
+    if(r.pasture) ensurePastureExists(r.pasture);
+    if(r.breed) ensureBreedExists(r.breed);
+  });
+  fresh.forEach(r=>{
     const weights = [];
     if(r.weight){
       const w = Number(r.weight);
@@ -2667,7 +2712,12 @@ function confirmImport(){
   closeModal();
   currentTab = 'animals';
   render();
-  toast(`Imported ${valid.length} animal${valid.length===1?'':'s'}`);
+  const parts = [];
+  if(fresh.length) parts.push(`imported ${fresh.length} new`);
+  if(updates.length) parts.push(`updated ${updates.length}`);
+  if(dups.length && !updates.length) parts.push(`skipped ${dups.length} already in herd`);
+  const msg = parts.join(', ');
+  toast(msg.charAt(0).toUpperCase() + msg.slice(1));
 }
 
 function downloadImportTemplate(){
