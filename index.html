@@ -2488,17 +2488,20 @@ function deleteAnimal(id){
 /* ---------- Import from spreadsheet ---------- */
 const IMPORT_HEADER_MAP = {
   tagid:'tagId', tag:'tagId', tagnumber:'tagId', eartag:'tagId', eartagid:'tagId', id:'tagId',
-  name:'name', animalname:'name',
-  class:'klass', type:'klass', category:'klass', sex:'klass', animalclass:'klass',
-  breed:'breed',
-  dob:'dob', dateofbirth:'dob', birthdate:'dob', born:'dob', birthday:'dob',
+  tagno:'tagId', tagnum:'tagId', eartagnumber:'tagId', eartagno:'tagId', animalid:'tagId', animalnumber:'tagId', animalno:'tagId',
+  cow:'tagId', cowid:'tagId', cownumber:'tagId', cowno:'tagId', cowtag:'tagId', idnumber:'tagId', idno:'tagId',
+  visualid:'tagId', vid:'tagId', tagid1:'tagId',
+  name:'name', animalname:'name', cowname:'name',
+  class:'klass', type:'klass', category:'klass', sex:'klass', animalclass:'klass', animaltype:'klass', gender:'klass', kind:'klass',
+  breed:'breed', breeds:'breed',
+  dob:'dob', dateofbirth:'dob', birthdate:'dob', born:'dob', birthday:'dob', datebirth:'dob', birthdt:'dob', bdate:'dob', calvingdate:'dob', borndate:'dob',
   yearletter:'yearLetter', yrletter:'yearLetter', year:'yearLetter', letter:'yearLetter', tattoo:'yearLetter', tattooletter:'yearLetter',
-  dam:'damId', damtag:'damId', mother:'damId', damid:'damId', damtagid:'damId',
-  sire:'sireId', siretag:'sireId', father:'sireId', sireid:'sireId', siretagid:'sireId',
+  dam:'damId', damtag:'damId', mother:'damId', damid:'damId', damtagid:'damId', damtagno:'damId', damnumber:'damId', damno:'damId',
+  sire:'sireId', siretag:'sireId', father:'sireId', sireid:'sireId', siretagid:'sireId', siretagno:'sireId', sirenumber:'sireId', sireno:'sireId', bull:'sireId',
   status:'status',
-  pasture:'pasture', location:'pasture', paddock:'pasture',
-  notes:'notes', comments:'notes', comment:'notes',
-  weight:'weight', currentweight:'weight', weightlb:'weight', weightlbs:'weight',
+  pasture:'pasture', location:'pasture', paddock:'pasture', field:'pasture', pen:'pasture', lot:'pasture', group:'pasture',
+  notes:'notes', comments:'notes', comment:'notes', note:'notes', remarks:'notes',
+  weight:'weight', currentweight:'weight', weightlb:'weight', weightlbs:'weight', wt:'weight', lbs:'weight', weightinlbs:'weight',
 };
 let importRows = [];
 
@@ -2509,10 +2512,11 @@ function normalizeClass(v){
   if(!s) return 'Cow';
   if(s.includes('bull') && s.includes('calf')) return 'Bull Calf';
   if(s.includes('heifer') && s.includes('calf')) return 'Heifer Calf';
+  if(s.includes('steer')) return 'Steer';
+  // "Bred heifer", "Open heifer", "Replacement heifer", "1st calf heifer"… are all heifers.
+  if(s.includes('heifer') || s==='h' || s==='hfr') return 'Heifer';
   if(s.startsWith('cow')) return 'Cow';
-  if(s.startsWith('bull') || s==='b' || s==='m' || s==='male') return 'Bull';
-  if(s.startsWith('heifer')) return 'Heifer';
-  if(s.startsWith('steer')) return 'Steer';
+  if(s.includes('bull') || s==='b' || s==='m' || s==='male') return 'Bull';
   if(s.includes('calf')) return 'Heifer Calf';
   if(s==='f'||s==='female') return 'Cow';
   return 'Cow';
@@ -2537,7 +2541,7 @@ function parseDateFlexible(v){
 
 function openImportModal(){
   const body = `
-    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Columns can be in any order (case-insensitive): <strong>Tag ID</strong> (required), Name, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight.</p>
+    <p class="hint" style="margin-bottom:14px; font-size:12.5px;">Upload a .xlsx, .xls, or .csv file. Every tab is read, and the header row can sit below a title. Columns can be in any order: <strong>Tag ID</strong> (required, also "Tag #", "Ear Tag", "Animal ID"…), Name, Class, Breed, DOB, Year Letter, Dam, Sire, Status, Pasture, Notes, Weight. Any other columns are kept in Notes.</p>
     <div class="field">
       <label>Spreadsheet file</label>
       <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" onchange="handleImportFile(event)">
@@ -2551,6 +2555,7 @@ function openImportModal(){
     </div>
   `;
   importRows = [];
+  importSheets = [];
   importDupMode = null;
   document.getElementById('modal-root').innerHTML = modalShell('Import animals from spreadsheet', body);
 }
@@ -2569,13 +2574,13 @@ function handleImportFile(evt){
     try{
       const data = new Uint8Array(e.target.result);
       const wb = XLSX.read(data, { type:'array', cellDates:true });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
-      if(rows.length === 0){
-        previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">That file doesn't have any rows we could read.</p>`;
+      importSheets = wb.SheetNames.map(name=>readImportSheet(name, wb.Sheets[name]));
+      if(!importSheets.some(sh=>sh.rows.length)){
+        const empty = importSheets.filter(sh=>!sh.headerFound).map(sh=>escapeHtml(sh.name)).join(', ');
+        previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't find a <b>Tag</b> column${empty? ' in '+empty : ''}. The sheet needs a header row with a column like "Tag ID", "Tag #", "Ear Tag" or "Animal ID".</p>`;
         return;
       }
-      processImportRows(rows);
+      processImportRows(importSheets.filter(sh=>sh.include).flatMap(sh=>sh.rows));
     }catch(err){
       previewEl.innerHTML = `<p class="hint" style="color:var(--danger);">Couldn't read that file. Make sure it's a valid .xlsx, .xls, or .csv export.</p>`;
     }
@@ -2588,22 +2593,59 @@ function handleImportFile(evt){
 
 // What to do with spreadsheet rows whose tag is already in the herd: null (not chosen yet), 'skip' or 'overwrite'.
 let importDupMode = null;
+let importExtraColumns = new Set();
+// Every tab is read. In each, the header row is the first of the top 15 rows that has a tag column,
+// so title rows above the headers are fine.
+let importSheets = [];
+function readImportSheet(name, sheet){
+  // Keep blank rows so row numbers match what Excel shows.
+  const grid = XLSX.utils.sheet_to_json(sheet, { header:1, defval:'', raw:false, blankrows:true });
+  const firstRow = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']).s.r + 1 : 1;
+  const h = grid.slice(0, 15).findIndex(row=> row.some(c=> IMPORT_HEADER_MAP[normalizeHeader(c)]==='tagId'));
+  if(h<0) return { name, rows:[], headerFound:false, include:false };
+  const headers = grid[h].map(c=>String(c||'').trim());
+  const rows = grid.slice(h+1)
+    .map((r, i)=>({ r, rowNum: firstRow + h + 1 + i }))
+    .filter(({r})=> r.some(c=> String(c).trim()!==''))
+    .map(({r, rowNum})=>{
+      const o = { __sheet: name, __row: rowNum };
+      headers.forEach((hd, j)=>{ if(hd && !(hd in o)) o[hd] = r[j]===undefined ? '' : r[j]; });
+      return o;
+    });
+  return { name, rows, headerFound:true, include: rows.length>0, headers };
+}
+function toggleImportSheet(i, on){
+  if(!importSheets[i]) return;
+  importSheets[i].include = on;
+  processImportRows(importSheets.filter(sh=>sh.include).flatMap(sh=>sh.rows));
+}
 function processImportRows(rows){
   const existingTags = new Set(state.animals.map(a=>a.tagId));
   const seenInFile = new Set();
   importDupMode = null;
+  importExtraColumns = new Set();
   importRows = rows.map(row=>{
     const rec = {};
+    const extras = [];
     Object.keys(row).forEach(h=>{
+      if(h.startsWith('__')) return;
       const key = IMPORT_HEADER_MAP[normalizeHeader(h)];
-      if(key && row[h]!=='') rec[key] = row[h];
+      const v = String(row[h]===undefined ? '' : row[h]).trim();
+      if(!v) return;
+      if(key){ if(!(key in rec)) rec[key] = row[h]; }
+      else { extras.push(h + ': ' + v); importExtraColumns.add(h); }
     });
+    // Columns Rangebook has no field for (Color, Reg #, …) are kept in Notes instead of being dropped.
+    if(extras.length) rec.notes = [String(rec.notes||'').trim(), ...extras].filter(Boolean).join('; ');
+    const classText = String(rec.klass||'').toLowerCase();
+    if(!rec.status && /\b(bred|preg)/.test(classText)) rec.status = 'Active – Preg';
     const tagId = String(rec.tagId||'').trim();
     let issue = '';
     if(!tagId) issue = 'Missing tag ID';
     else if(seenInFile.has(tagId)) issue = 'Duplicate in file';
     if(tagId) seenInFile.add(tagId);
     return {
+      sheet: row.__sheet, rowNum: row.__row,
       inHerd: !issue && existingTags.has(tagId),
       provided: Object.keys(rec),
       tagId,
@@ -2645,6 +2687,12 @@ function renderImportPreview(){
   }
   el.innerHTML = `
     <div class="panel" style="margin:14px 0 0; padding:14px 16px;">
+      ${importSheets.length>1 ? `<div style="font-size:12.5px; margin-bottom:10px;"><b>Tabs in this file:</b>
+        ${importSheets.map((sh,i)=> sh.headerFound
+          ? `<label style="display:inline-flex; align-items:center; gap:5px; margin:4px 12px 0 0;"><input type="checkbox" ${sh.include?'checked':''} onchange="toggleImportSheet(${i}, this.checked)"> ${escapeHtml(sh.name)} <span class="muted">(${sh.rows.length})</span></label>`
+          : `<span class="muted" style="display:inline-block; margin:4px 12px 0 0;">${escapeHtml(sh.name)} (no Tag column — ignored)</span>`).join('')}
+      </div>` : ''}
+      ${importExtraColumns.size ? `<p class="hint" style="margin:0 0 10px;">Columns without a matching field are saved into each animal's Notes: <b>${[...importExtraColumns].map(escapeHtml).join(', ')}</b>.</p>` : ''}
       <p style="margin:0 0 10px; font-size:13px;"><strong>${fresh.length}</strong> new${dups.length? `, <strong>${dups.length}</strong> already in your herd`:''}${invalid.length? `, <strong>${invalid.length}</strong> can't be imported`:''}.</p>
       ${dups.length ? `
       <div style="background:var(--tag-bg); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; margin-bottom:12px; font-size:12.5px;">
@@ -2657,9 +2705,11 @@ function renderImportPreview(){
       </div>` : ''}
       <div style="max-height:220px; overflow-y:auto;">
         <table class="ledger import-table" style="font-size:12.5px;">
-          <thead><tr><th>Tag</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
+          <thead><tr>${importSheets.length>1?'<th>Tab</th>':''}<th>Row</th><th>Tag</th><th>Class</th><th>DOB</th><th>Status</th></tr></thead>
           <tbody>
-            ${importRows.slice(0,80).map(r=>`<tr>
+            ${importRows.map(r=>`<tr>
+              ${importSheets.length>1?`<td class="muted">${escapeHtml(r.sheet||'')}</td>`:''}
+              <td class="num-cell muted">${r.rowNum||''}</td>
               <td>${escapeHtml(r.tagId)||'<span class="muted">—</span>'}</td>
               <td>${r.klass}</td>
               <td class="num-cell">${r.dob? fmtDate(r.dob) : '<span class="muted">—</span>'}</td>
@@ -2668,7 +2718,7 @@ function renderImportPreview(){
           </tbody>
         </table>
       </div>
-      ${importRows.length>80? `<p class="hint">Showing first 80 of ${importRows.length} rows.</p>`:''}
+      <p class="hint" style="margin:8px 0 0;">${importRows.length} row${importRows.length===1?'':'s'} read. Scroll to see them all.</p>
     </div>
   `;
 }
