@@ -543,14 +543,19 @@ let driveConfig = loadDriveConfig();
 let driveStatus = 'idle'; // idle | connected | error | syncing
 let driveLastSync = null;
 
+function driveError(code, msg){ const e = new Error(msg || code); e.code = code; return e; }
 async function driveFetchState(){
   const sep = driveConfig.url.includes('?') ? '&' : '?';
-  const res = await fetch(driveConfig.url + sep + 'secret=' + encodeURIComponent(driveConfig.secret||''));
-  if(!res.ok) throw new Error('HTTP '+res.status);
+  let res;
+  // A web app that isn't shared with "Anyone" answers with a Google sign-in page, which the browser blocks as a network error.
+  try{ res = await fetch(driveConfig.url + sep + 'secret=' + encodeURIComponent(driveConfig.secret||'')); }
+  catch(e){ throw driveError('blocked', e.message); }
+  if(!res.ok) throw driveError(res.status===404 ? 'not-found' : 'http', 'HTTP '+res.status);
   const text = await res.text();
   if(!text) return null;
-  const parsed = JSON.parse(text);
-  if(parsed && parsed.error) throw new Error(parsed.error);
+  let parsed;
+  try{ parsed = JSON.parse(text); }catch(e){ throw driveError('blocked', 'not JSON'); }
+  if(parsed && parsed.error) throw driveError(parsed.error==='unauthorized' ? 'unauthorized' : 'script', parsed.error);
   return parsed;
 }
 // Version 2+ scripts merge saves on Google's side under a lock; older ones just overwrite.
@@ -1836,9 +1841,10 @@ function openDriveModal(){
       </div>
       <div class="field"><label>Web app URL or connection code</label><input type="text" name="connect" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec  or  rb1.…"></div>
       <details style="margin-bottom:6px; font-size:12.5px; color:var(--ink-soft);">
-        <summary style="cursor:pointer;">Using a script you set up earlier with your own secret?</summary>
+        <summary style="cursor:pointer;">Have the secret from your script? (optional)</summary>
         <div class="field" style="margin-top:10px;"><label>Secret</label><input type="text" name="secret" autocomplete="off" placeholder="SECRET from your script"></div>
       </details>
+      <div id="drive-connect-error" style="display:none; background:var(--danger-bg); color:var(--ink); border:1px solid var(--danger); border-radius:var(--radius); padding:10px 12px; font-size:12.5px; line-height:1.55; margin-top:10px;"></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
         <button type="submit" class="btn rust">Connect</button>
@@ -1847,6 +1853,33 @@ function openDriveModal(){
   `;
   document.getElementById('modal-root').innerHTML = modalShell('Google Drive sync', body);
 }
+// Catch the usual wrong-link mistakes before contacting Google.
+function driveUrlProblem(url){
+  if(/\/dev(\?.*)?$/.test(url)) return `That's the <b>test (/dev)</b> link, which only works for you while signed in. Use the <b>Web app URL</b> from Deploy → Manage deployments — it ends in <span class="mono">/exec</span>.`;
+  if(!/\/exec(\?.*)?$/.test(url)) return `That looks like the <b>script editor</b> link, not the web app. In Apps Script click <b>Deploy → Manage deployments</b> and copy the <b>Web app URL</b> — it ends in <span class="mono">/exec</span>.`;
+  return null;
+}
+function showDriveConnectError(html){
+  const el = document.getElementById('drive-connect-error');
+  if(!el) return;
+  el.innerHTML = html;
+  el.style.display = html ? 'block' : 'none';
+  if(html) el.scrollIntoView({ block:'nearest' });
+}
+const DRIVE_ERROR_HELP = {
+  unauthorized: `<b>The script's secret doesn't match this browser.</b> This happens when the script was copied in a different browser or from the downloaded file version of the app.<br>
+    <b>Fix:</b> in your Apps Script, find the line <span class="mono">const SECRET = "…"</span>, copy the text between the quotes into the <b>Secret</b> box above, and tap Connect again.`,
+  blocked: `<b>Google blocked the request.</b> In Apps Script open <b>Deploy → Manage deployments</b>, click ✎ Edit, and check:
+    <ul style="margin:6px 0 0; padding-left:18px;">
+      <li>Type is <b>Web app</b> and Execute as is <b>Me</b>.</li>
+      <li>Who has access is exactly <b>Anyone</b> — not "Anyone with Google account" or only your organization.</li>
+      <li>Click <b>Deploy</b> after any change, and finish the "Authorize access" prompts.</li>
+    </ul>
+    If <b>Anyone</b> isn't in the list, your Google Workspace administrator has turned off public web apps. Set up the script with a personal Gmail account instead, or ask your admin to allow it.`,
+  'not-found': `<b>Google couldn't find that web app.</b> The link may be cut off, or that deployment was archived. Copy the Web app URL again from Deploy → Manage deployments.`,
+  script: `<b>The script ran into an error.</b> Make sure you replaced <i>all</i> the code in the project with the copied script, saved, and deployed a new version.`,
+  http: `<b>Google returned an error.</b> Wait a minute and try again. If it keeps happening, deploy a new version of the script.`,
+};
 function parseDriveInput(text, manualSecret){
   const fromCode = decodeDriveCode(text);
   if(fromCode) return fromCode;
@@ -1873,7 +1906,7 @@ async function connectDrive(cfg){
   }catch(e){
     persistDriveConfig(prevCfg);
     driveStatus = 'error';
-    return false;
+    return e.code || 'blocked';
   }finally{
     refreshDriveStatusUI();
   }
@@ -1881,18 +1914,27 @@ async function connectDrive(cfg){
 async function saveDriveConnection(evt){
   evt.preventDefault();
   const f = evt.target;
+  showDriveConnectError('');
   const cfg = parseDriveInput(f.connect.value, f.secret.value.trim());
-  if(!cfg){ toast('Paste the Web app URL (script.google.com/…/exec) or a connection code'); return; }
+  if(!cfg){ showDriveConnectError(`Paste the <b>Web app URL</b> (starts with <span class="mono">https://script.google.com/</span> and ends in <span class="mono">/exec</span>) or a connection code from another device.`); return; }
+  const urlProblem = decodeDriveCode(f.connect.value) ? null : driveUrlProblem(cfg.url);
+  if(urlProblem){ showDriveConnectError(urlProblem); return; }
   const submitBtn = f.querySelector('button[type="submit"]');
   if(submitBtn){ submitBtn.disabled = true; submitBtn.textContent = 'Connecting…'; }
-  if(await connectDrive(cfg)){
+  const result = await connectDrive(cfg);
+  if(result === true){
     closeModal();
     render();
     toast('Connected to Google Drive');
-  } else {
-    toast("Couldn't connect — check that you deployed the copied script with access set to \"Anyone\"");
-    if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = 'Connect'; }
+    return;
   }
+  showDriveConnectError(DRIVE_ERROR_HELP[result] || DRIVE_ERROR_HELP.blocked);
+  if(result === 'unauthorized'){
+    const details = f.querySelector('details');
+    if(details) details.open = true;
+    if(f.secret) f.secret.focus();
+  }
+  if(submitBtn){ submitBtn.disabled = false; submitBtn.textContent = 'Connect'; }
 }
 // Opening a link like …#drive=rb1.… offers to connect this device.
 async function connectFromLinkIfPresent(){
