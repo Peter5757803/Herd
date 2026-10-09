@@ -804,6 +804,10 @@ function ageLabel(dob){
   if(d<730) return Math.floor(d/30.4) + 'mo';
   return (d/365.25).toFixed(1) + 'yr';
 }
+const STATUS_LABELS = { 'active':'Active', 'active-preg':'Active – Preg', 'sold':'Sold', 'deceased':'Deceased' };
+// "Active – Preg" animals are still in the herd, so they count as active everywhere.
+function isActive(a){ return !!a && (a.status==='active' || a.status==='active-preg'); }
+function statusLabel(s){ return STATUS_LABELS[s] || s || '—'; }
 function animalById(id){ return state.animals.find(a=>a.id===id); }
 function animalByTag(tag){ return state.animals.find(a=>a.tagId===tag); }
 function eartagClass(a){
@@ -1000,7 +1004,7 @@ function removeVaccineByIndex(idx){
 
 function getFilteredAnimals(){
   let list = state.animals.filter(a=>{
-    if(animalFilters.status!=='all' && a.status!==animalFilters.status) return false;
+    if(animalFilters.status!=='all' && !(animalFilters.status==='active' ? isActive(a) : a.status===animalFilters.status)) return false;
     if(animalFilters.klass!=='all' && a.klass!==animalFilters.klass) return false;
     if(animalFilters.search){
       const s = animalFilters.search.toLowerCase();
@@ -1012,7 +1016,7 @@ function getFilteredAnimals(){
   return list;
 }
 function getPastureGroups(){
-  const active = state.animals.filter(a=>a.status==='active');
+  const active = state.animals.filter(a=>isActive(a));
   const map = {};
   active.forEach(a=>{
     const key = (a.pasture||'').trim();
@@ -1024,7 +1028,7 @@ function getPastureGroups(){
   return map;
 }
 function unassignedAnimals(){
-  return state.animals.filter(a=>a.status==='active' && !(a.pasture||'').trim());
+  return state.animals.filter(a=>isActive(a) && !(a.pasture||'').trim());
 }
 
 /* =========================================================
@@ -1042,8 +1046,8 @@ function renderTabs(){
   const el = document.getElementById('tabs');
   el.innerHTML = TABS.map(t=>{
     let count = '';
-    if(t.id==='animals') count = state.animals.filter(a=>a.status==='active').length;
-    if(t.id==='pairs') count = state.animals.filter(a=>a.klass==='Cow' && a.status==='active').length;
+    if(t.id==='animals') count = state.animals.filter(a=>isActive(a)).length;
+    if(t.id==='pairs') count = state.animals.filter(a=>a.klass==='Cow' && isActive(a)).length;
     if(t.id==='pastures') count = state.pastures.length;
     if(t.id==='health') count = state.events.length;
     if(t.id==='breeding') count = state.breeding.length;
@@ -1094,7 +1098,7 @@ function getUpcomingTasks(){
   state.events.forEach(ev=>{
     if(ev.nextDue){
       const a = animalById(ev.animalId);
-      if(!a || a.status!=='active') return;
+      if(!a || !isActive(a)) return;
       const days = daysBetween(today, ev.nextDue);
       tasks.push({
         title: `${ev.type} due — ${a.tagId}`,
@@ -1106,7 +1110,7 @@ function getUpcomingTasks(){
   });
 
   // weaning window for calves
-  state.animals.filter(a=> (a.klass==='Bull Calf' || a.klass==='Heifer Calf') && a.status==='active' && !a.weanDate).forEach(a=>{
+  state.animals.filter(a=> (a.klass==='Bull Calf' || a.klass==='Heifer Calf') && isActive(a) && !a.weanDate).forEach(a=>{
     const age = ageInDays(a.dob);
     if(age===null) return;
     const daysToTarget = WEAN_TARGET_DAYS - age;
@@ -1121,7 +1125,7 @@ function getUpcomingTasks(){
   // expected calvings
   state.breeding.filter(b=> b.result!=='Open' && !b.actualCalvingDate).forEach(b=>{
     const cow = animalByTag(b.cowTagId);
-    if(!cow || cow.status!=='active') return;
+    if(!cow || !isActive(cow)) return;
     const days = daysBetween(today, b.expectedCalvingDate);
     tasks.push({
       title: `Expected calving — ${b.cowTagId}`,
@@ -1142,7 +1146,7 @@ function taskUrgency(days){
 }
 
 function viewDashboard(){
-  const active = state.animals.filter(a=>a.status==='active');
+  const active = state.animals.filter(a=>isActive(a));
   const cows = active.filter(a=>a.klass==='Cow').length;
   const bulls = active.filter(a=>a.klass==='Bull').length;
   const heifers = active.filter(a=>a.klass==='Heifer').length;
@@ -1221,6 +1225,7 @@ function viewAnimals(){
       </select>
       <div class="chip-toggle">
         <button class="chip ${animalFilters.status==='active'?'active':''}" onclick="animalFilters.status='active'; render();">Active</button>
+        <button class="chip ${animalFilters.status==='active-preg'?'active':''}" onclick="animalFilters.status='active-preg'; render();">Active – Preg</button>
         <button class="chip ${animalFilters.status==='sold'?'active':''}" onclick="animalFilters.status='sold'; render();">Sold</button>
         <button class="chip ${animalFilters.status==='deceased'?'active':''}" onclick="animalFilters.status='deceased'; render();">Deceased</button>
         <button class="chip ${animalFilters.status==='all'?'active':''}" onclick="animalFilters.status='all'; render();">All</button>
@@ -1243,7 +1248,7 @@ function viewAnimals(){
             const w = latestWeight(a);
             return `<tr onclick="openDrawer('${a.id}')">
               <td onclick="event.stopPropagation()"><input type="checkbox" ${selectedAnimalIds.has(a.id)?'checked':''} onchange="toggleAnimalSelect('${a.id}', this.checked)"></td>
-              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.name? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(a.name)}</div>`:''}</div></div></td>
+              <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}${a.name? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(a.name)}</div>`:''}</div></div></td>
               <td class="num-cell">${a.yearLetter? escapeHtml(a.yearLetter) : '<span class="muted">—</span>'}</td>
               <td>${a.klass}</td>
               <td>${breedBadge(a.breed)}</td>
@@ -1265,7 +1270,7 @@ function viewAnimals(){
    PAIRS
 ========================================================= */
 function viewPairs(){
-  const cows = state.animals.filter(a=>a.klass==='Cow' && a.status==='active').sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  const cows = state.animals.filter(a=>a.klass==='Cow' && isActive(a)).sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
   if(cows.length===0){
     return `<div class="empty-state"><div class="icon">🐮</div><h3>No cows on file yet</h3><p>Add a cow to start tracking pairs.</p><button class="btn rust" onclick="openAnimalModal('Cow')">+ Add a cow</button></div>`;
   }
@@ -1274,7 +1279,7 @@ function viewPairs(){
     <p class="section-desc">Each cow with her calf(ves) currently at side. Weaning windows target ${WEAN_TARGET_DAYS} days.</p>
     <div class="pair-grid">
       ${cows.map(cow=>{
-        const calves = state.animals.filter(c=> c.damId===cow.tagId && c.status==='active' && !c.weanDate);
+        const calves = state.animals.filter(c=> c.damId===cow.tagId && isActive(c) && !c.weanDate);
         const w = latestWeight(cow);
         return `<div class="pair-card">
           <div class="cow-row">
@@ -1500,7 +1505,7 @@ function savePasture(evt, id, editing){
 function deletePasture(id){
   const p = state.pastures.find(x=>x.id===id);
   if(!p) return;
-  const affected = state.animals.filter(a=>a.status==='active' && (a.pasture||'').trim()===p.name).length;
+  const affected = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===p.name).length;
   const msg = affected>0
     ? `Delete "${p.name}"? ${affected} animal${affected===1?'':'s'} currently assigned here will become unassigned.`
     : `Delete "${p.name}"?`;
@@ -1517,7 +1522,7 @@ function deletePasture(id){
 let moveModalIds = [];
 function openGroupMoveModal(idx){
   const name = pastureGroupNamesCache[idx];
-  const animals = state.animals.filter(a=>a.status==='active' && (a.pasture||'').trim()===name);
+  const animals = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===name);
   if(animals.length===0){ toast('No animals in this group'); return; }
   openMoveModal(`Moving ${animals.length} animal${animals.length===1?'':'s'} currently in "${name}".`, animals.map(a=>a.id));
 }
@@ -2375,7 +2380,8 @@ function openAnimalModal(presetKlass, editId){
         <div class="field"><label>Year letter</label><input type="text" name="yearLetter" maxlength="2" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. Y" style="text-transform:uppercase;"></div>
         <div class="field"><label>Status</label>
           <select name="status" id="animal-status-select" onchange="toggleSalePriceField()">
-            <option value="active" ${a.status==='active'?'selected':''}>Active</option>
+            <option value="active" ${a.status==="active"?'selected':''}>Active</option>
+            <option value="active-preg" ${a.status==='active-preg'?'selected':''}>Active – Preg</option>
             <option value="sold" ${a.status==='sold'?'selected':''}>Sold</option>
             <option value="deceased" ${a.status==='deceased'?'selected':''}>Deceased</option>
           </select>
@@ -2487,6 +2493,7 @@ function normalizeClass(v){
 function normalizeStatus(v){
   const s = String(v||'').trim().toLowerCase();
   if(s.startsWith('sold')) return 'sold';
+  if(/preg|^bred/.test(s)) return 'active-preg';
   if(s.startsWith('dead') || s.startsWith('decease')) return 'deceased';
   return 'active';
 }
@@ -2648,7 +2655,7 @@ function downloadImportTemplate(){
 
 /* ---------- Event modal ---------- */
 function openEventModal(presetAnimalId){
-  const activeAnimals = state.animals.filter(a=>a.status==='active').sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
+  const activeAnimals = state.animals.filter(a=>isActive(a)).sort((a,b)=>(a.tagId||'').localeCompare(b.tagId||''));
   if(activeAnimals.length===0){
     toast('Add an animal first');
     return;
@@ -2865,8 +2872,8 @@ function saveEvent(evt){
 function openBreedingModal(editId, presetCowTagId){
   const editing = editId ? state.breeding.find(b=>b.id===editId) : null;
   const b = editing || { id:uid(), cowTagId:presetCowTagId||'', method:'Natural', sireTagIds:[], sireOther:'', sireTagId:'', breedingDate:todayStr(), result:'Pending', actualCalvingDate:'', calfTagId:'' };
-  const cows = state.animals.filter(a=>a.status==='active' && (a.klass==='Cow' || a.klass==='Heifer')).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
-  const activeBulls = state.animals.filter(a=>a.klass==='Bull' && a.status==='active').sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
+  const cows = state.animals.filter(a=>isActive(a) && (a.klass==='Cow' || a.klass==='Heifer')).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
+  const activeBulls = state.animals.filter(a=>a.klass==='Bull' && isActive(a)).sort((x,y)=>(x.tagId||'').localeCompare(y.tagId||''));
   const preSelectedBulls = new Set(b.sireTagIds || []);
   let otherValue = b.sireOther || '';
   if((!b.sireTagIds || b.sireTagIds.length===0) && !otherValue && b.sireTagId){
@@ -3063,7 +3070,7 @@ function openDrawer(id){
       ${a.photo ? `<img src="${a.photo}" alt="${escapeHtml(a.name)||a.tagId}" style="width:100%;max-height:220px;object-fit:cover;border-radius:4px;margin-bottom:14px;border:1px solid var(--line-soft);">` : ''}
       ${eartag(a)}
       <div class="drawer-title">${escapeHtml(a.name) || a.tagId}</div>
-      <div class="drawer-sub">${a.klass} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${a.status}</div>
+      <div class="drawer-sub">${a.klass} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${statusLabel(a.status)}</div>
 
       <div class="kv-grid">
         <div class="kv"><div class="k">Date of birth</div><div class="v">${fmtDate(a.dob)}</div></div>
@@ -3126,7 +3133,7 @@ function handleGlobalSearchInput(q){
           ${eartag(a)}
           <span class="gs-meta">${a.name? escapeHtml(a.name)+' · ':''}${a.klass}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
         </div>
-        ${a.status!=='active'? `<span class="status-tag">${a.status}</span>`:''}
+        ${a.status!=="active"? `<span class="status-tag">${statusLabel(a.status)}</span>`:''}
         ${canBreed ? `<button type="button" class="btn ghost sm" onclick="event.stopPropagation(); editBreedingFromSearch('${a.id}')">Breeding</button>` : ''}
       </div>`;
     }).join('');
