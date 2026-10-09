@@ -2463,6 +2463,14 @@ function openAnimalModal(presetKlass, editId){
           <div class="field" style="margin-bottom:0;"><label>Tested on</label><input type="date" name="semenCheckDate" value="${a.semenCheckDate||''}"></div>
         </div>
       </div>
+      <div id="bull-purchase-fields" class="field" style="display:${a.klass==='Bull'?'block':'none'}; background:var(--surface-2); padding:12px 14px; border-radius:var(--radius);">
+        <label style="margin-bottom:10px;">Purchase (bulls)</label>
+        <div class="field-row three" style="margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;"><label>Purchase price ($)</label><input type="number" name="purchasePrice" min="0" step="0.01" value="${escapeHtml(a.purchasePrice)}" placeholder="e.g. 6500"></div>
+          <div class="field" style="margin-bottom:0;"><label>Purchased from (breeder)</label><input type="text" name="purchasedFrom" list="breeder-options" value="${escapeHtml(a.purchasedFrom)}" placeholder="e.g. Smith Angus Ranch"><datalist id="breeder-options">${[...new Set(state.animals.map(x=>x.purchasedFrom).filter(Boolean))].sort().map(n=>`<option value="${escapeHtml(n)}">`).join('')}</datalist></div>
+          <div class="field" style="margin-bottom:0;"><label>Purchase date</label><input type="date" name="purchaseDate" value="${a.purchaseDate||''}"></div>
+        </div>
+      </div>
       <div id="sale-price-field" class="field" style="display:${a.status==='sold'?'block':'none'};">
         <label>Sale price</label>
         <input type="number" name="salePrice" min="0" step="0.01" value="${escapeHtml(a.salePrice)}" placeholder="e.g. 1450">
@@ -2502,6 +2510,8 @@ function toggleBullFields(){
   const sel = document.getElementById('animal-klass-select');
   const box = document.getElementById('bull-fields');
   if(sel && box) box.style.display = sel.value==='Bull' ? 'block' : 'none';
+  const buy = document.getElementById('bull-purchase-fields');
+  if(sel && buy) buy.style.display = sel.value==='Bull' ? 'block' : 'none';
 }
 function setSemenCheck(v){
   const input = document.getElementById('semen-check-input');
@@ -2542,6 +2552,9 @@ function saveAnimal(evt, id, editing){
   rec.scrotalCm = isBull && f.scrotalCm.value!=='' ? Number(f.scrotalCm.value) : '';
   rec.semenCheck = isBull ? f.semenCheck.value : '';
   rec.semenCheckDate = isBull ? f.semenCheckDate.value : '';
+  rec.purchasePrice = isBull && f.purchasePrice.value!=='' ? Number(f.purchasePrice.value) : '';
+  rec.purchasedFrom = isBull ? f.purchasedFrom.value.trim() : '';
+  rec.purchaseDate = isBull ? f.purchaseDate.value : '';
   ensurePastureExists(rec.pasture);
   ensureBreedExists(rec.breed);
   if(editing){
@@ -2587,6 +2600,9 @@ const IMPORT_HEADER_MAP = {
   notes:'notes', comments:'notes', comment:'notes', note:'notes', remarks:'notes',
   scrotal:'scrotalCm', sc:'scrotalCm', scrotalcircumference:'scrotalCm', scrotalcm:'scrotalCm', scrotalsize:'scrotalCm', sccm:'scrotalCm',
   semen:'semenCheck', semencheck:'semenCheck', sementest:'semenCheck', bse:'semenCheck', breedingsoundness:'semenCheck', semencheckresult:'semenCheck',
+  purchaseprice:'purchasePrice', price:'purchasePrice', cost:'purchasePrice', boughtfor:'purchasePrice', paid:'purchasePrice',
+  purchasedfrom:'purchasedFrom', breeder:'purchasedFrom', seller:'purchasedFrom', boughtfrom:'purchasedFrom', source:'purchasedFrom', bullbreeder:'purchasedFrom',
+  purchasedate:'purchaseDate', datepurchased:'purchaseDate', bought:'purchaseDate', datebought:'purchaseDate',
   weight:'weight', currentweight:'weight', weightlb:'weight', weightlbs:'weight', wt:'weight', lbs:'weight', weightinlbs:'weight',
 };
 let importRows = [];
@@ -2751,6 +2767,9 @@ function processImportRows(rows){
       sireId: String(rec.sireId||'').trim(),
       scrotalCm: rec.scrotalCm!==undefined && !isNaN(parseFloat(rec.scrotalCm)) ? parseFloat(rec.scrotalCm) : '',
       semenCheck: normalizeSemenCheck(rec.semenCheck),
+      purchasePrice: rec.purchasePrice!==undefined && !isNaN(parseFloat(String(rec.purchasePrice).replace(/[$,]/g,''))) ? parseFloat(String(rec.purchasePrice).replace(/[$,]/g,'')) : '',
+      purchasedFrom: String(rec.purchasedFrom||'').trim(),
+      purchaseDate: parseDateFlexible(rec.purchaseDate),
       status: normalizeStatus(rec.status),
       pasture: String(rec.pasture||'').trim(),
       notes: String(rec.notes||'').trim(),
@@ -2820,7 +2839,7 @@ function renderImportPreview(){
 }
 
 // Spreadsheet column -> animal field, for overwriting an existing animal with only the cells that were filled in.
-const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes','scrotalCm','semenCheck'];
+const IMPORT_OVERWRITE_FIELDS = ['name','klass','breed','dob','yearLetter','damId','sireId','status','pasture','notes','scrotalCm','semenCheck','purchasePrice','purchasedFrom','purchaseDate'];
 function confirmImport(){
   const fresh = importRows.filter(r=>!r.issue && !r.inHerd);
   const dups = importRows.filter(r=>!r.issue && r.inHerd);
@@ -2852,6 +2871,7 @@ function confirmImport(){
       id: uid(), tagId: r.tagId, name: r.name, klass: r.klass, breed: r.breed, dob: r.dob, yearLetter: r.yearLetter,
       damId: r.damId, sireId: r.sireId, status: r.status, pasture: r.pasture, notes: r.notes,
       scrotalCm: r.scrotalCm, semenCheck: r.semenCheck,
+      purchasePrice: r.purchasePrice, purchasedFrom: r.purchasedFrom, purchaseDate: r.purchaseDate,
       weights, weanDate: null
     });
   });
@@ -3341,6 +3361,8 @@ function openDrawer(id){
         <div class="kv"><div class="k">Pasture</div><div class="v">${escapeHtml(a.pasture)||'—'}</div></div>
         ${a.klass==='Bull' ? `<div class="kv"><div class="k">Scrotal circ.</div><div class="v">${a.scrotalCm!==undefined && a.scrotalCm!=='' ? escapeHtml(a.scrotalCm)+' cm' : '—'}</div></div>
         <div class="kv"><div class="k">Semen check</div><div class="v" style="color:${a.semenCheck==='Failed'?'var(--danger)':a.semenCheck==='Passed'?'var(--pasture-dark)':'inherit'};">${a.semenCheck ? escapeHtml(a.semenCheck)+(a.semenCheckDate? ' · '+fmtDate(a.semenCheckDate):'') : 'Not tested'}</div></div>` : ''}
+        ${a.klass==='Bull' ? `<div class="kv"><div class="k">Purchase price</div><div class="v">${a.purchasePrice!==undefined && a.purchasePrice!=='' ? '$'+Number(a.purchasePrice).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</div></div>
+        <div class="kv"><div class="k">Purchased from</div><div class="v">${escapeHtml(a.purchasedFrom)||'—'}${a.purchaseDate? ' · '+fmtDate(a.purchaseDate):''}</div></div>` : ''}
         <div class="kv"><div class="k">Latest weight</div><div class="v">${latestWeight(a)? latestWeight(a).lbs+' lb':'—'}</div></div>
         ${a.status==='sold' ? `<div class="kv"><div class="k">Sale price</div><div class="v">${a.salePrice!==undefined && a.salePrice!==''? '$'+Number(a.salePrice).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '—'}</div></div>` : ''}
       </div>
