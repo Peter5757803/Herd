@@ -478,7 +478,7 @@
       </div>
     </div>
     <div class="global-search-wrap" id="global-search-wrap">
-      <input type="text" id="global-search-input" class="search-input" style="width:100%;" placeholder="Search animals by tag, name, or breed…" autocomplete="off" oninput="handleGlobalSearchInput(this.value)" onfocus="handleGlobalSearchInput(this.value)">
+      <input type="text" id="global-search-input" class="search-input" style="width:100%;" placeholder="Search animals by tag, name, breed, or class…" autocomplete="off" oninput="handleGlobalSearchInput(this.value)" onfocus="handleGlobalSearchInput(this.value)">
       <div id="global-search-results" class="global-search-results" style="display:none;"></div>
     </div>
     <div style="display:flex; gap:10px;">
@@ -815,6 +815,11 @@ function isBredHeifer(a){
   if(a.status==='active-preg') return true;
   return state.breeding.some(b=> b.cowTagId===a.tagId && b.result!=='Open' && !b.actualCalvingDate);
 }
+// Class as shown to people: heifers in the herd are split into Bred / Open, same as the dashboard.
+function classLabel(a){
+  if(a && a.klass==='Heifer' && isActive(a)) return isBredHeifer(a) ? 'Bred Heifer' : 'Open Heifer';
+  return a ? a.klass : '';
+}
 // After her first calf a heifer is a cow: she's recorded as a calf's dam, or a breeding record shows she calved.
 function promoteHeifersWithCalves(){
   const promoted = [];
@@ -1019,14 +1024,17 @@ function removeVaccineByIndex(idx){
   toast('Vaccine removed');
 }
 
+function animalMatchesSearch(a, q){
+  const s = String(q||'').trim().toLowerCase();
+  return [a.tagId, a.name, a.breed, classLabel(a)].some(v=> String(v||'').toLowerCase().includes(s));
+}
 function getFilteredAnimals(){
   let list = state.animals.filter(a=>{
     if(animalFilters.status!=='all' && !(animalFilters.status==='active' ? isActive(a) : a.status===animalFilters.status)) return false;
-    if(animalFilters.klass!=='all' && a.klass!==animalFilters.klass) return false;
-    if(animalFilters.search){
-      const s = animalFilters.search.toLowerCase();
-      if(!(a.tagId||'').toLowerCase().includes(s) && !(a.name||'').toLowerCase().includes(s) && !(a.breed||'').toLowerCase().includes(s)) return false;
-    }
+    if(animalFilters.klass==='Bred Heifer' || animalFilters.klass==='Open Heifer'){
+      if(classLabel(a)!==animalFilters.klass) return false;
+    } else if(animalFilters.klass!=='all' && a.klass!==animalFilters.klass) return false;
+    if(animalFilters.search && !animalMatchesSearch(a, animalFilters.search)) return false;
     return true;
   });
   list.sort((a,b)=> (a.tagId||'').localeCompare(b.tagId||''));
@@ -1237,10 +1245,10 @@ function viewAnimals(){
 
   return `
     <div class="toolbar">
-      <input id="animal-search-input" class="search-input" type="text" placeholder="Search tag, name, or breed…" value="${escapeHtml(animalFilters.search)}" oninput="animalFilters.search=this.value; render();">
+      <input id="animal-search-input" class="search-input" type="text" placeholder="Search tag, name, breed, or class…" value="${escapeHtml(animalFilters.search)}" oninput="animalFilters.search=this.value; render();">
       <select onchange="animalFilters.klass=this.value; render();">
         <option value="all" ${animalFilters.klass==='all'?'selected':''}>All classes</option>
-        ${CLASSES.map(c=>`<option value="${c}" ${animalFilters.klass===c?'selected':''}>${c}</option>`).join('')}
+        ${CLASSES.flatMap(c=> c==='Heifer' ? ['Heifer','Bred Heifer','Open Heifer'] : [c]).map(c=>`<option value="${c}" ${animalFilters.klass===c?'selected':''}>${c==='Heifer' ? 'Heifers (all)' : c}</option>`).join('')}
       </select>
       <div class="chip-toggle">
         <button class="chip ${animalFilters.status==='active'?'active':''}" onclick="animalFilters.status='active'; render();">Active</button>
@@ -1269,7 +1277,7 @@ function viewAnimals(){
               <td onclick="event.stopPropagation()"><input type="checkbox" ${selectedAnimalIds.has(a.id)?'checked':''} onchange="toggleAnimalSelect('${a.id}', this.checked)"></td>
               <td><div style="display:flex; align-items:center; gap:8px;">${a.photo? `<img src="${a.photo}" alt="" style="width:28px;height:28px;object-fit:cover;border-radius:50%;border:1px solid var(--line-soft);flex-shrink:0;">`:''}<div>${eartag(a)}${a.status==='active-preg' ? ` <span class="age-pill due">Preg</span>` : ''}${a.name? `<div class="muted" style="font-size:11.5px;margin-top:3px;">${escapeHtml(a.name)}</div>`:''}</div></div></td>
               <td class="num-cell">${a.yearLetter? escapeHtml(a.yearLetter) : '<span class="muted">—</span>'}</td>
-              <td>${a.klass}</td>
+              <td>${classLabel(a)}</td>
               <td>${breedBadge(a.breed)}</td>
               <td class="num-cell">${fmtDate(a.dob)}</td>
               <td class="num-cell">${ageLabel(a.dob)}</td>
@@ -3120,7 +3128,7 @@ function openDrawer(id){
       ${a.photo ? `<img src="${a.photo}" alt="${escapeHtml(a.name)||a.tagId}" style="width:100%;max-height:220px;object-fit:cover;border-radius:4px;margin-bottom:14px;border:1px solid var(--line-soft);">` : ''}
       ${eartag(a)}
       <div class="drawer-title">${escapeHtml(a.name) || a.tagId}</div>
-      <div class="drawer-sub">${a.klass} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${statusLabel(a.status)}</div>
+      <div class="drawer-sub">${classLabel(a)} · ${a.breed? breedBadge(a.breed) : 'Breed unrecorded'} · ${statusLabel(a.status)}</div>
 
       <div class="kv-grid">
         <div class="kv"><div class="k">Date of birth</div><div class="v">${fmtDate(a.dob)}</div></div>
@@ -3168,11 +3176,7 @@ function handleGlobalSearchInput(q){
   if(!box) return;
   const query = (q||'').trim().toLowerCase();
   if(!query){ box.style.display='none'; box.innerHTML=''; return; }
-  const matches = state.animals.filter(a=>{
-    return (a.tagId||'').toLowerCase().includes(query)
-      || (a.name||'').toLowerCase().includes(query)
-      || (a.breed||'').toLowerCase().includes(query);
-  }).slice(0,8);
+  const matches = state.animals.filter(a=> animalMatchesSearch(a, query)).slice(0,8);
   if(matches.length===0){
     box.innerHTML = `<div class="global-search-empty">No animals match "${escapeHtml(q)}"</div>`;
   } else {
@@ -3181,7 +3185,7 @@ function handleGlobalSearchInput(q){
       return `<div class="global-search-row">
         <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer;" onclick="selectGlobalSearchResult('${a.id}')">
           ${eartag(a)}
-          <span class="gs-meta">${a.name? escapeHtml(a.name)+' · ':''}${a.klass}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
+          <span class="gs-meta">${a.name? escapeHtml(a.name)+' · ':''}${classLabel(a)}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
         </div>
         ${a.status!=="active"? `<span class="status-tag">${statusLabel(a.status)}</span>`:''}
         ${canBreed ? `<button type="button" class="btn ghost sm" onclick="event.stopPropagation(); editBreedingFromSearch('${a.id}')">Breeding</button>` : ''}
