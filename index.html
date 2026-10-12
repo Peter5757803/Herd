@@ -159,7 +159,7 @@
 
   /* ---------- Cards / stat blocks ---------- */
   .grid{ display:grid; gap:14px; }
-  .stat-grid{ grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); margin-bottom:26px; }
+  .stat-grid{ grid-template-columns:repeat(auto-fit, minmax(128px,1fr)); margin-bottom:26px; }
   .stat-card{
     background:var(--surface);
     border:1px solid var(--line-soft);
@@ -540,6 +540,8 @@
   .stat-card .num{ font-size: 32px; color: var(--leather); }
   .stat-card .label::before{ content: "★ "; color: var(--brass); }
   .stat-card.accent .num{ color: var(--rust); }
+  .stat-card.clickable{ cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
+  .stat-card.clickable:hover{ transform: translateY(-2px); box-shadow: 0 2px 0 rgba(46,29,16,0.08), 0 8px 18px rgba(46,29,16,0.16); }
   .panel h2{ font-size: 18px; }
   .panel h2 .btn, .modal-head .btn{ font-family: 'Public Sans', sans-serif; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
   .section-title{ font-size: 21px; }
@@ -1398,15 +1400,22 @@ function openUpcomingGroup(idx){
 let summaryFilters = { klass:'all', pasture:'all', groupBy:'age' };
 let summaryBuckets = [];
 const SUMMARY_CLASS_FILTERS = [
-  ['all','All animals'], ['Cow','Cows'], ['Bred Heifer','Bred heifers'], ['Open Heifer','Open heifers'],
+  ['all','All animals'], ['Cow','Cows'], ['preg','Pregnant (Active – Preg)'], ['Bred Heifer','Bred heifers'], ['Open Heifer','Open heifers'],
   ['Heifer','All heifers'], ['Bull','Bulls'], ['Steer','Steers'], ['calves','Calves'],
 ];
 const SUMMARY_GROUPS = [['age','Age'], ['class','Class'], ['pasture','Pasture'], ['breed','Breed'], ['yearLetter','Year letter']];
+// Open the summary pre-filtered from a dashboard card (always by age, across all pastures).
+function openSummary(klass){
+  summaryFilters = { klass, pasture:'all', groupBy:'age' };
+  setTab('summary');
+  window.scrollTo(0, 0);
+}
 function summaryAnimals(){
   return state.animals.filter(a=>{
     if(!isActive(a)) return false;
     const k = summaryFilters.klass;
     if(k==='calves'){ if(a.klass!=='Bull Calf' && a.klass!=='Heifer Calf') return false; }
+    else if(k==='preg'){ if(a.status!=='active-preg') return false; }
     else if(k==='Bred Heifer' || k==='Open Heifer'){ if(classLabel(a)!==k) return false; }
     else if(k!=='all' && a.klass!==k) return false;
     if(summaryFilters.pasture!=='all'){
@@ -1578,6 +1587,7 @@ function viewDashboard(){
   const cows = active.filter(a=>a.klass==='Cow').length;
   const bulls = active.filter(a=>a.klass==='Bull').length;
   const bredHeifers = active.filter(isBredHeifer).length;
+  const pregnant = active.filter(a=>a.status==='active-preg').length;
   const heifers = active.filter(a=>a.klass==='Heifer').length - bredHeifers;
   const calves = active.filter(a=>a.klass==='Bull Calf' || a.klass==='Heifer Calf').length;
   const pairsCount = active.filter(a=>a.klass==='Cow').filter(cow => active.some(c=>c.damId===cow.tagId)).length;
@@ -1592,16 +1602,17 @@ function viewDashboard(){
 
   return `
     <div class="grid stat-grid">
-      <div class="stat-card" style="cursor:pointer;" title="Open herd summary" onclick="setTab('summary')"><div class="num">${active.length}</div><div class="label">Head total ›</div></div>
-      <div class="stat-card"><div class="num">${cows}</div><div class="label">Cows</div></div>
-      <div class="stat-card"><div class="num">${bredHeifers}</div><div class="label">Bred heifers</div></div>
-      <div class="stat-card"><div class="num">${calves}</div><div class="label">Calves at side</div></div>
-      <div class="stat-card"><div class="num">${heifers}</div><div class="label">Open heifers</div></div>
-      <div class="stat-card"><div class="num">${bulls}</div><div class="label">Bulls</div></div>
-      <div class="stat-card ${overdueCount>0?'accent':''}"><div class="num">${overdueCount}</div><div class="label">Overdue tasks</div></div>
+      <div class="stat-card clickable" title="Open herd summary" onclick="openSummary('all')"><div class="num">${active.length}</div><div class="label">Head total&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Cows by age" onclick="openSummary('Cow')"><div class="num">${cows}</div><div class="label">Cows&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Pregnant animals by age" onclick="openSummary('preg')"><div class="num">${pregnant}</div><div class="label">Pregnant&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Bred heifers by age" onclick="openSummary('Bred Heifer')"><div class="num">${bredHeifers}</div><div class="label">Bred heifers&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Calves by age" onclick="openSummary('calves')"><div class="num">${calves}</div><div class="label">Calves at side&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Open heifers by age" onclick="openSummary('Open Heifer')"><div class="num">${heifers}</div><div class="label">Open heifers&nbsp;›</div></div>
+      <div class="stat-card clickable" title="Bulls by age" onclick="openSummary('Bull')"><div class="num">${bulls}</div><div class="label">Bulls&nbsp;›</div></div>
+      <div class="stat-card clickable ${overdueCount>0?'accent':''}" title="Go to Upcoming & overdue" onclick="document.getElementById('upcoming-panel').scrollIntoView({behavior:'smooth', block:'start'})"><div class="num">${overdueCount}</div><div class="label">Overdue tasks&nbsp;›</div></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" id="upcoming-panel">
       <h2>Upcoming &amp; overdue <button class="btn ghost sm" onclick="setTab('health')">Log an event</button></h2>
       <p class="sub">Scheduled events, follow-ups, weaning windows and expected calvings. Click one to see the animals.</p>
       ${tasks.length===0 ? `<div class="empty-state"><div class="icon">📋</div><h3>Nothing on the books</h3><p>Add breeding, health, or calf records to see reminders here.</p></div>` :
