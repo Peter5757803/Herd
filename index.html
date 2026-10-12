@@ -1425,7 +1425,33 @@ function summaryAnimals(){
     return true;
   });
 }
-function ageYears(a){ const d = ageInDays(a.dob); return d===null || d<0 ? null : Math.floor(d/365.25); }
+/* Age comes from the year letter (North American system: I, O, Q, U, V are skipped, so 21 letters,
+   A = 2013 … N = 2025, P = 2026, repeating every 21 years). The date of birth is kept for reference
+   (and weaning, which needs the exact day) but isn't used for age. */
+const YEAR_LETTERS = 'ABCDEFGHJKLMNPRSTWXYZ';
+function yearFromLetter(letter){
+  const i = YEAR_LETTERS.indexOf(String(letter||'').trim().toUpperCase());
+  if(i < 0 || String(letter||'').trim().length !== 1) return null;
+  const now = new Date().getFullYear();
+  let y = 2013 + i;
+  while(y > now) y -= YEAR_LETTERS.length;
+  while(y + YEAR_LETTERS.length <= now) y += YEAR_LETTERS.length;
+  return y;
+}
+function ageYears(a){ const y = yearFromLetter(a && a.yearLetter); return y===null ? null : new Date().getFullYear() - y; }
+function yearLetterHint(letter){
+  const l = String(letter||'').trim().toUpperCase();
+  if(!l) return 'Sets the age.';
+  const y = yearFromLetter(l);
+  if(y===null) return 'Not a year letter (I, O, Q, U and V aren\'t used).';
+  const n = new Date().getFullYear() - y;
+  return `Born ${y} · ${n===0 ? 'this year' : n + (n===1 ? ' yr' : ' yrs')}`;
+}
+function ageText(a){
+  const n = ageYears(a);
+  if(n===null) return '—';
+  return n===0 ? 'This year' : n + (n===1 ? ' yr' : ' yrs');
+}
 function summaryBucketsFor(animals){
   const g = summaryFilters.groupBy;
   const map = new Map();
@@ -1433,9 +1459,8 @@ function summaryBucketsFor(animals){
   animals.forEach(a=>{
     if(g==='age'){
       const y = ageYears(a);
-      if(y===null) put('none','No birth date', 999, a);
-      else if(y>=10) put('10','10+ yrs', 10, a);
-      else put(String(y), y===0 ? 'Under 1 yr' : y===1 ? '1 yr' : y+' yrs', y, a);
+      if(y===null) put('none','No year letter', 999, a);
+      else { const L = String(a.yearLetter).trim().toUpperCase(); put(String(y), `${y===0 ? 'Born this year' : y===1 ? '1 yr' : y+' yrs'} · ${L} (${yearFromLetter(L)})`, y, a); }
     } else if(g==='class'){ const c = classLabel(a); put(c, c, CLASSES.indexOf(a.klass)*2 + (c==='Open Heifer'?1:0), a); }
     else if(g==='pasture'){ const v = (a.pasture||'').trim(); put(v||'none', v||'No pasture', v? 0 : 1, a); }
     else if(g==='breed'){ const v = (a.breed||'').trim(); put(v||'none', v||'No breed', v? 0 : 1, a); }
@@ -1492,7 +1517,7 @@ function viewSummary(){
   const buckets = summaryBucketsFor(animals);
   summaryBuckets = buckets;
   const ages = animals.map(ageYears).filter(v=>v!==null);
-  const avg = ages.length ? (animals.map(a=>ageInDays(a.dob)).filter(d=>d!==null && d>=0).reduce((s,d)=>s+d,0) / ages.length / 365.25) : null;
+  const avg = ages.length ? ages.reduce((s,v)=>s+v,0) / ages.length : null;
   const pastures = Object.keys(getPastureGroups()).sort((x,y)=>x.localeCompare(y, undefined, { numeric:true }));
   const classLbl = (SUMMARY_CLASS_FILTERS.find(c=>c[0]===summaryFilters.klass)||['','All animals'])[1];
   const sel = (id, opts, cur, onchange)=> `<select id="${id}" onchange="${onchange}">${opts.map(([v,l])=>`<option value="${escapeHtml(v)}" ${v===cur?'selected':''}>${escapeHtml(l)}</option>`).join('')}</select>`;
@@ -1501,7 +1526,7 @@ function viewSummary(){
       <button class="btn ghost sm" onclick="setTab('dashboard')">← Dashboard</button>
       <div class="section-title" style="margin:0 0 0 6px;">Herd summary</div>
     </div>
-    <p class="section-desc">Active head (including Active – Preg). Click a bar or a row to see those animals.</p>
+    <p class="section-desc">Active head (including Active – Preg). Ages come from the year letter. Click a bar or a row to see those animals.</p>
     <div class="toolbar">
       <label class="hint" style="margin:0;">Show</label>
       ${sel('sum-klass', SUMMARY_CLASS_FILTERS, summaryFilters.klass, "summaryFilters.klass=this.value; render();")}
@@ -1514,7 +1539,7 @@ function viewSummary(){
       <div class="stat-card"><div class="num">${animals.length}</div><div class="label">${escapeHtml(classLbl)}</div></div>
       <div class="stat-card"><div class="num">${avg===null ? '—' : avg.toFixed(1)}</div><div class="label">Average age (yrs)</div></div>
       <div class="stat-card"><div class="num">${ages.length ? Math.max(...ages) : '—'}</div><div class="label">Oldest (yrs)</div></div>
-      <div class="stat-card"><div class="num">${animals.length - ages.length}</div><div class="label">No birth date</div></div>
+      <div class="stat-card"><div class="num">${animals.length - ages.length}</div><div class="label">No year letter</div></div>
     </div>
     <div class="panel" style="position:relative;">
       <h2>${escapeHtml(classLbl)} by ${escapeHtml(summaryGroupLabel())}</h2>
@@ -1559,7 +1584,7 @@ function openSummaryBucket(i){
     <p class="hint" style="margin:0 0 14px; font-size:12.5px;">${animals.length} animal${animals.length===1?'':'s'}</p>
     <div style="border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--white); max-height:420px; overflow-y:auto;">
       ${animals.map(a=>`<div class="mini-row" style="padding:8px 10px; cursor:pointer;" onclick="closeModal(); openDrawer('${a.id}')">
-        <span>${eartag(a)} <span class="muted" style="font-size:11.5px;">${escapeHtml(classLabel(a))} · ${ageLabel(a.dob)}</span></span>
+        <span>${eartag(a)} <span class="muted" style="font-size:11.5px;">${escapeHtml(classLabel(a))} · ${ageText(a)}</span></span>
         <span class="d">${a.pasture ? '📍 '+escapeHtml(a.pasture) : 'No pasture'}</span>
       </div>`).join('')}
     </div>
@@ -1699,7 +1724,7 @@ function viewAnimals(){
               <td>${classLabel(a)}</td>
               <td>${breedBadge(a.breed)}</td>
               <td class="num-cell">${fmtDate(a.dob)}</td>
-              <td class="num-cell">${ageLabel(a.dob)}</td>
+              <td class="num-cell">${ageText(a)}</td>
               <td>${a.damId ? (animalByTag(a.damId) ? eartag(animalByTag(a.damId)) : '<span class="muted">Not in herd</span>') : '<span class="muted">—</span>'}</td>
               <td>${escapeHtml(a.pasture)||'<span class="muted">—</span>'}</td>
               <td class="num-cell">${w? w.lbs+' lb' : '<span class="muted">—</span>'}</td>
@@ -2931,7 +2956,7 @@ function openAnimalModal(presetKlass, editId){
       </div>
       <div class="field-row three">
         <div class="field"><label>Date of birth</label><input type="date" name="dob" value="${a.dob||''}"></div>
-        <div class="field"><label>Year letter <span id="year-letter-swatch" title="Tag colour for this year letter" style="display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:middle; margin-left:4px; border:1px solid rgba(0,0,0,0.2); background:${tagColorForLetter(a.yearLetter)||'transparent'};"></span></label><input type="text" name="yearLetter" maxlength="2" oninput="const sw=document.getElementById('year-letter-swatch'); if(sw) sw.style.background = tagColorForLetter(this.value)||'transparent';" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. Y" style="text-transform:uppercase;"></div>
+        <div class="field"><label>Year letter <span id="year-letter-swatch" title="Tag colour for this year letter" style="display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:middle; margin-left:4px; border:1px solid rgba(0,0,0,0.2); background:${tagColorForLetter(a.yearLetter)||'transparent'};"></span></label><input type="text" name="yearLetter" maxlength="2" oninput="const sw=document.getElementById('year-letter-swatch'); if(sw) sw.style.background = tagColorForLetter(this.value)||'transparent'; const h=document.getElementById('year-letter-hint'); if(h) h.textContent = yearLetterHint(this.value);" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. N" style="text-transform:uppercase;"><p class="hint" id="year-letter-hint">${escapeHtml(yearLetterHint(a.yearLetter))}</p></div>
         <div class="field"><label>Status</label>
           <select name="status" id="animal-status-select" onchange="toggleSalePriceField()">
             <option value="active" ${a.status==="active"?'selected':''}>Active</option>
@@ -3866,7 +3891,7 @@ function openDrawer(id){
 
       <div class="kv-grid">
         <div class="kv"><div class="k">Date of birth</div><div class="v">${fmtDate(a.dob)}</div></div>
-        <div class="kv"><div class="k">Age</div><div class="v">${ageLabel(a.dob)}</div></div>
+        <div class="kv"><div class="k">Age</div><div class="v">${ageText(a)}${yearFromLetter(a.yearLetter) ? ' <span class="muted" style="font-weight:500;">('+yearFromLetter(a.yearLetter)+')</span>' : ''}</div></div>
         <div class="kv"><div class="k">Year letter</div><div class="v">${escapeHtml(a.yearLetter)||'—'}</div></div>
         <div class="kv"><div class="k">Dam</div><div class="v">${dam? escapeHtml(displayName(dam)) : (a.damId ? 'Not in herd' : '—')}</div></div>
         <div class="kv"><div class="k">Sire</div><div class="v">${escapeHtml(nameForTag(a.sireId))}</div></div>
