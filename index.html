@@ -658,6 +658,14 @@ let driveConfig = loadDriveConfig();
 let driveStatus = 'idle'; // idle | connected | error | syncing
 let driveLastSync = null;
 
+// Scripts older than version 3 don't know about tag colours and drop them when merging.
+// Until the script is updated, each device keeps its own tag colours instead of losing them.
+function keepLocalOnlyData(mergedJson, local){
+  if(driveScriptVersion===null || driveScriptVersion >= 3 || driveScriptVersion === 1) return mergedJson;
+  const m = JSON.parse(mergedJson);
+  if(!(m.tagColors && m.tagColors.length) && local.tagColors && local.tagColors.length){ m.tagColors = local.tagColors; return JSON.stringify(m); }
+  return mergedJson;
+}
 function driveError(code, msg){ const e = new Error(msg || code); e.code = code; return e; }
 
 /* When the app is served by the Workspace script (HtmlService), Google provides
@@ -689,7 +697,11 @@ async function driveFetchState(){
 // Version 2+ scripts merge saves on Google's side under a lock; older ones just overwrite.
 let driveScriptVersion = null;
 async function driveCheckVersion(){
-  if(hostedInWorkspace) return (driveScriptVersion = 2);
+  if(hostedInWorkspace){
+    try{ const info = await gasCall('rbInfo'); driveScriptVersion = (info && info.version) || 2; }
+    catch(e){ driveScriptVersion = 2; }
+    return driveScriptVersion;
+  }
   try{
     const sep = driveConfig.url.includes('?') ? '&' : '?';
     const res = await fetch(driveConfig.url + sep + 'ping=1&secret=' + encodeURIComponent(driveConfig.secret||''));
@@ -742,6 +754,7 @@ function normalizeState(parsed){
       return { name: b.name, color: b.color || BREED_PALETTE[idx % BREED_PALETTE.length] };
     }),
     vaccines: parsed.vaccines || [],
+    tagColors: (parsed.tagColors || []).filter(t=> t && t.letter).map(t=>({ letter: String(t.letter).trim().toUpperCase(), color: t.color || '#888888' })),
   };
 }
 function applyLoadedState(parsed){
@@ -757,6 +770,7 @@ let syncBase = null;
 const SYNC_KEYS = {
   animals: r=>r.id, events: r=>r.id, breeding: r=>r.id, pastures: r=>r.id,
   breeds: r=>String(r.name||'').toLowerCase(), vaccines: r=>String(r).toLowerCase(),
+  tagColors: r=>String(r.letter||'').toUpperCase(),
 };
 function mergeCollection(base, local, remote, keyFn){
   const key = r=>{ const k = keyFn(r); return (k===undefined || k===null || k==='') ? 'json:'+JSON.stringify(r) : String(k); };
@@ -785,6 +799,7 @@ function driveSync(){
     try{
       do{
         syncAgain = false;
+        if(driveScriptVersion === null) await driveCheckVersion();
         const before = JSON.stringify(normalizeState(state));
         let mergedJson;
         if(syncBase !== null && before === syncBase){
@@ -802,6 +817,7 @@ function driveSync(){
             if(mergedJson !== JSON.stringify(remote)) await driveSaveState(merged);
           }
         }
+        mergedJson = keepLocalOnlyData(mergedJson, JSON.parse(before));
         syncBase = mergedJson;
         const merged = JSON.parse(mergedJson);
         if(JSON.stringify(normalizeState(state)) === before){
@@ -833,7 +849,10 @@ window.addEventListener('focus', pullFromDrive);
 async function loadState(){
   try{
     if(driveEnabled()){
-      const parsed = normalizeState(await driveFetchState());
+      await driveCheckVersion();
+      let local = {};
+      try{ local = normalizeState(JSON.parse(localStorage.getItem('herd-data')||'{}')); }catch(e){}
+      const parsed = JSON.parse(keepLocalOnlyData(JSON.stringify(normalizeState(await driveFetchState())), local));
       driveStatus = 'connected';
       applyLoadedState(parsed);
       syncBase = JSON.stringify(parsed);
@@ -968,8 +987,25 @@ function nameForTag(ref){
   return a ? displayName(a) : ref;
 }
 function byName(x, y){ return displayName(x).localeCompare(displayName(y), undefined, { numeric:true, sensitivity:'base' }); }
+/* ---------- Tag colour library ----------
+   Each year letter has an ear-tag colour (Settings → Tag color library); badges for animals
+   with that letter use it. Sold/deceased animals stay grey. */
+function tagColorForLetter(letter){
+  const l = String(letter||'').trim().toUpperCase();
+  if(!l) return null;
+  const t = (state.tagColors||[]).find(x=>x.letter===l);
+  return t ? t.color : null;
+}
+function readableTextOn(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex||'');
+  if(!m) return '#FFFDF7';
+  const n = parseInt(m[1], 16), r = n>>16 & 255, g = n>>8 & 255, b = n & 255;
+  return (0.299*r + 0.587*g + 0.114*b) > 160 ? '#2E1D10' : '#FFFDF7';
+}
 function eartag(a){
-  return `<span class="eartag ${eartagClass(a)}">${escapeHtml(displayName(a))}</span>`;
+  const color = a && a.id && isActive(a) ? tagColorForLetter(a.yearLetter) : null;
+  const style = color ? ` style="background:${color}; color:${readableTextOn(color)};"` : '';
+  return `<span class="eartag ${eartagClass(a)}"${style}>${escapeHtml(displayName(a))}</span>`;
 }
 function escapeHtml(str){
   if(str===undefined || str===null) return '';
@@ -1104,6 +1140,47 @@ function vaccineChecklistHtml(checkedNames){
 }
 function selectedVaccines(form){
   return Array.from(form.querySelectorAll('input[name="vaccines"]:checked')).map(cb=>cb.value);
+}
+function renderTagColorChips(){
+  const list = (state.tagColors||[]).slice().sort((a,b)=>a.letter.localeCompare(b.letter));
+  if(!list.length) return `<p class="hint" style="margin:0;">No tag colours yet.</p>`;
+  return `<div class="chip-toggle">${list.map(t=>{
+    const n = state.animals.filter(a=> isActive(a) && String(a.yearLetter||'').toUpperCase()===t.letter).length;
+    return `<span class="chip" style="display:inline-flex; align-items:center; gap:7px;">
+      <input type="color" value="${t.color}" title="Change colour" onchange="updateTagColor('${escapeHtml(t.letter)}', this.value)" style="width:16px; height:16px; padding:0; border:none; border-radius:50%; cursor:pointer; overflow:hidden;">
+      <span class="eartag" style="background:${t.color}; color:${readableTextOn(t.color)}; padding:1px 8px 1px 14px; font-size:11.5px;">${escapeHtml(t.letter)}</span>
+      <span class="muted" style="font-size:11px;">${n} head</span>
+      <button type="button" onclick="removeTagColor('${escapeHtml(t.letter)}')" style="background:none; border:none; color:inherit; cursor:pointer; font-weight:700; padding:0 2px; line-height:1; font-size:14px;">×</button>
+    </span>`;}).join('')}</div>`;
+}
+function refreshTagColorChips(){
+  const el = document.getElementById('tagcolor-chip-list');
+  if(el) el.innerHTML = renderTagColorChips();
+}
+function addTagColorFromSettings(){
+  const input = document.getElementById('new-tagcolor-letter');
+  const colorInput = document.getElementById('new-tagcolor-color');
+  if(!input) return;
+  const letter = input.value.trim().toUpperCase();
+  if(!/^[A-Z0-9]{1,2}$/.test(letter)){ toast('Enter a year letter, e.g. N'); return; }
+  state.tagColors = state.tagColors || [];
+  const existing = state.tagColors.find(t=>t.letter===letter);
+  if(existing) existing.color = colorInput.value; else state.tagColors.push({ letter, color: colorInput.value });
+  saveState(); render();
+  input.value = '';
+  refreshTagColorChips();
+  toast(existing ? `Updated colour for ${letter}` : `Added tag colour for ${letter}`);
+}
+function updateTagColor(letter, color){
+  const t = (state.tagColors||[]).find(x=>x.letter===letter);
+  if(!t) return;
+  t.color = color;
+  saveState(); render(); refreshTagColorChips();
+}
+function removeTagColor(letter){
+  state.tagColors = (state.tagColors||[]).filter(t=>t.letter!==letter);
+  saveState(); render(); refreshTagColorChips();
+  toast(`Removed tag colour for ${letter}`);
 }
 let vaccineChipCache = [];
 function renderVaccineChips(){
@@ -1899,7 +1976,7 @@ function modalShell(title, bodyHtml){
 }
 
 /* ---------- Google Drive sync ---------- */
-const DRIVE_SCRIPT_VERSION = 2;
+const DRIVE_SCRIPT_VERSION = 3;
 // Merge logic shared by both Apps Script backends: replay one device's changes (base -> local) onto the current file.
 const GAS_MERGE_SRC = `const KEYS_ = {
   animals: function (r) { return r.id; },
@@ -1907,7 +1984,8 @@ const GAS_MERGE_SRC = `const KEYS_ = {
   breeding: function (r) { return r.id; },
   pastures: function (r) { return r.id; },
   breeds: function (r) { return String((r && r.name) || r || '').toLowerCase(); },
-  vaccines: function (r) { return String(r).toLowerCase(); }
+  vaccines: function (r) { return String(r).toLowerCase(); },
+  tagColors: function (r) { return String((r && r.letter) || '').toUpperCase(); }
 };
 
 // Apply one device's changes (base -> local) on top of the current file.
@@ -2013,6 +2091,7 @@ function workspaceScriptSource(){
 const APP_URL = ${JSON.stringify(appUrl)};
 const FILE_NAME = 'rangebook-herd-data.json';
 const APP_CACHE_NAME = 'rangebook-app-cache.html';
+const VERSION = ${DRIVE_SCRIPT_VERSION};
 
 function getOrCreate_(name, initial) {
   const files = DriveApp.getFilesByName(name);
@@ -2064,7 +2143,7 @@ function rbSave(localJson, baseJson) {
 }
 
 function rbInfo() {
-  return { url: ScriptApp.getService().getUrl(), user: Session.getActiveUser().getEmail() };
+  return { url: ScriptApp.getService().getUrl(), user: Session.getActiveUser().getEmail(), version: VERSION };
 }
 `;
 }
@@ -2137,12 +2216,12 @@ function openDriveModal(){
     </div>`;
   const stepStyle = 'margin:0; padding-left:18px; font-size:12.5px; color:var(--ink-soft); line-height:1.7;';
   if(connected && driveScriptVersion===null){
-    driveCheckVersion().then(v=>{ if(v===1 && document.getElementById('drive-update-slot')) openDriveModal(); });
+    driveCheckVersion().then(v=>{ if(v && v < DRIVE_SCRIPT_VERSION && document.getElementById('drive-update-slot')) openDriveModal(); });
   }
-  const updateNotice = (connected && driveScriptVersion===1) ? `
+  const updateNotice = (connected && driveScriptVersion && driveScriptVersion < DRIVE_SCRIPT_VERSION) ? `
     <div class="field" style="background:var(--tag-bg); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
-      <label style="margin-bottom:6px; color:var(--tag-dark);">Update your Drive script for multiple users</label>
-      <p class="hint" style="margin:0 0 8px; color:var(--ink-soft);">Your script is an older version. If two people save at the same moment, one person's change can be lost. Updating takes a minute and keeps the same URL and code:</p>
+      <label style="margin-bottom:6px; color:var(--tag-dark);">Update your Drive script</label>
+      <p class="hint" style="margin:0 0 8px; color:var(--ink-soft);">${driveScriptVersion===1 ? "Your script is an older version. If two people save at the same moment, one person's change can be lost." : "Your script is an older version that doesn't share tag colours between devices yet."} Updating takes a minute and keeps the same URL and code:</p>
       <ol style="${stepStyle}">
         <li><button type="button" class="btn ghost sm" onclick="copyDriveScript()">Copy updated script</button></li>
         <li>Open your project at <a href="https://script.google.com" target="_blank" rel="noopener" style="color:var(--rust); font-weight:600;">script.google.com</a>, replace all the code with the copied script, and save.</li>
@@ -2373,6 +2452,17 @@ function openWorkspaceDriveModal(){
       <p class="hint" style="margin:0 0 8px;">Send this link to anyone in your organization. They sign in with their own Google account.${info.user ? ' You are signed in as <b>'+escapeHtml(info.user)+'</b>.' : ''}</p>
       <input type="text" readonly class="mono" style="width:100%; font-size:12px;" value="${escapeHtml(info.url)}" onfocus="this.select()">
       <button type="button" class="btn ghost sm" style="margin-top:8px;" onclick="copyText(${escapeHtml(JSON.stringify(info.url))}, 'Link copied')">Copy link</button>`;
+    driveScriptVersion = (info && info.version) || 2;
+    if(driveScriptVersion < DRIVE_SCRIPT_VERSION) el.insertAdjacentHTML('beforebegin', `
+      <div class="field" style="background:var(--tag-bg); padding:12px 14px; border-radius:var(--radius); margin-bottom:16px;">
+        <label style="margin-bottom:6px; color:var(--tag-dark);">Update your Workspace script</label>
+        <p class="hint" style="margin:0 0 8px; color:var(--ink-soft);">Your script is an older version that doesn't share tag colours between people yet. Updating takes a minute and keeps the same link:</p>
+        <ol style="margin:0; padding-left:18px; font-size:12.5px; color:var(--ink-soft); line-height:1.7;">
+          <li><button type="button" class="btn ghost sm" onclick="copyWorkspaceScript()">Copy updated script</button></li>
+          <li>Open your project at <a href="https://script.google.com" target="_blank" rel="noopener" style="color:var(--rust); font-weight:600;">script.google.com</a>, replace all the code with the copied script, and save.</li>
+          <li>Deploy → Manage deployments → ✎ Edit → Version: <b>New version</b> → Deploy.</li>
+        </ol>
+      </div>`);
   }).catch(()=>{
     const el = document.getElementById('workspace-info');
     if(el) el.innerHTML = `<label style="margin-bottom:6px;">Share with your crew</label><p class="hint" style="margin:0;">Send your crew the same link you used to open this app.</p>`;
@@ -2491,6 +2581,16 @@ function openSettingsModal(scrollTo){
         <button type="button" class="btn ghost sm" onclick="addVaccineFromSettings()">Add</button>
       </div>
       <div id="vaccine-chip-list">${renderVaccineChips()}</div>
+    </div>
+    <div class="field" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
+      <label>Tag color library</label>
+      <p class="hint" style="margin:0 0 10px;">Pick the ear-tag colour for each year letter. Animals with that year letter show their tag in this colour everywhere in the app.</p>
+      <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
+        <input type="color" id="new-tagcolor-color" value="#B23A2E" title="Tag colour" style="width:36px; height:36px; padding:0; border:none; border-radius:6px; cursor:pointer; flex-shrink:0;">
+        <input type="text" id="new-tagcolor-letter" maxlength="2" placeholder="Year letter, e.g. N" style="flex:1; text-transform:uppercase;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addTagColorFromSettings();}">
+        <button type="button" class="btn ghost sm" onclick="addTagColorFromSettings()">Add</button>
+      </div>
+      <div id="tagcolor-chip-list">${renderTagColorChips()}</div>
     </div>
     <div class="field" id="pasture-library-section" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
       <label>Pasture library</label>
@@ -2632,7 +2732,7 @@ function openAnimalModal(presetKlass, editId){
       </div>
       <div class="field-row three">
         <div class="field"><label>Date of birth</label><input type="date" name="dob" value="${a.dob||''}"></div>
-        <div class="field"><label>Year letter</label><input type="text" name="yearLetter" maxlength="2" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. Y" style="text-transform:uppercase;"></div>
+        <div class="field"><label>Year letter <span id="year-letter-swatch" title="Tag colour for this year letter" style="display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:middle; margin-left:4px; border:1px solid rgba(0,0,0,0.2); background:${tagColorForLetter(a.yearLetter)||'transparent'};"></span></label><input type="text" name="yearLetter" maxlength="2" oninput="const sw=document.getElementById('year-letter-swatch'); if(sw) sw.style.background = tagColorForLetter(this.value)||'transparent';" value="${escapeHtml(a.yearLetter)}" placeholder="e.g. Y" style="text-transform:uppercase;"></div>
         <div class="field"><label>Status</label>
           <select name="status" id="animal-status-select" onchange="toggleSalePriceField()">
             <option value="active" ${a.status==="active"?'selected':''}>Active</option>
