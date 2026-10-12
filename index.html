@@ -1119,53 +1119,63 @@ function render(){
 /* =========================================================
    DASHBOARD
 ========================================================= */
+/* Upcoming & overdue: one row per event (same kind, type and date), listing the animals involved.
+   Sources: health events dated in the future, follow-ups (Next due date), weaning windows, expected calvings. */
+let upcomingCache = [];
 function getUpcomingTasks(){
-  const tasks = [];
   const today = todayStr();
+  const groups = new Map();
+  const add = (key, label, kind, date, animalId)=>{
+    if(!date) return;
+    if(!groups.has(key)) groups.set(key, { key, label, kind, date, days: daysBetween(today, date), animalIds: [] });
+    const g = groups.get(key);
+    if(animalId && !g.animalIds.includes(animalId)) g.animalIds.push(animalId);
+  };
+  const detail = ev=> ev.vaccine ? ' · ' + ev.vaccine : (ev.pregResult ? ' · ' + ev.pregResult : '');
 
-  // health events with a next-due date
   state.events.forEach(ev=>{
+    const a = animalById(ev.animalId);
+    if(!a || !isActive(a)) return;
+    // Scheduled: logged with a date that hasn't arrived yet.
+    if(ev.date && ev.date > today){
+      add(`sched|${ev.type}|${ev.date}|${detail(ev)}`, ev.type + detail(ev), 'Scheduled', ev.date, a.id);
+    }
+    // Follow-up due, unless a later event of the same type has been logged for this animal since.
     if(ev.nextDue){
-      const a = animalById(ev.animalId);
-      if(!a || !isActive(a)) return;
-      const days = daysBetween(today, ev.nextDue);
-      tasks.push({
-        title: `${ev.type} due — ${displayName(a)}`,
-        sub: a.klass + (ev.notes ? ' · '+ev.notes : ''),
-        date: ev.nextDue,
-        days
-      });
+      const followedUp = state.events.some(o=> o!==ev && o.animalId===ev.animalId && o.type===ev.type && o.date > ev.date && o.date <= today);
+      if(!followedUp) add(`due|${ev.type}|${ev.nextDue}|${detail(ev)}`, ev.type + detail(ev), 'Follow-up due', ev.nextDue, a.id);
     }
   });
 
-  // weaning window for calves
   state.animals.filter(a=> (a.klass==='Bull Calf' || a.klass==='Heifer Calf') && isActive(a) && !a.weanDate).forEach(a=>{
     const age = ageInDays(a.dob);
     if(age===null) return;
-    const daysToTarget = WEAN_TARGET_DAYS - age;
-    tasks.push({
-      title: `Wean ${displayName(a)}`,
-      sub: `Calf is ${ageLabel(a.dob)} old`,
-      date: addDays(today, daysToTarget),
-      days: daysToTarget
-    });
+    const date = addDays(today, WEAN_TARGET_DAYS - age);
+    add(`wean|${date}`, 'Weaning', 'Weaning window', date, a.id);
   });
 
-  // expected calvings
   state.breeding.filter(b=> b.result!=='Open' && !b.actualCalvingDate).forEach(b=>{
     const cow = animalByTag(b.cowTagId);
     if(!cow || !isActive(cow)) return;
-    const days = daysBetween(today, b.expectedCalvingDate);
-    tasks.push({
-      title: `Expected calving — ${displayName(cow)}`,
-      sub: isBredHeifer(cow) ? 'Bred heifer' : cow.klass,
-      date: b.expectedCalvingDate,
-      days
-    });
+    add(`calving|${b.expectedCalvingDate}`, 'Expected calving', 'Breeding', b.expectedCalvingDate, cow.id);
   });
 
-  tasks.sort((a,b)=> a.days - b.days);
-  return tasks;
+  return [...groups.values()].sort((x,y)=> x.days - y.days);
+}
+function openUpcomingGroup(idx){
+  const g = upcomingCache[idx];
+  if(!g) return;
+  const animals = g.animalIds.map(animalById).filter(Boolean).sort(byName);
+  const body = `
+    <p class="hint" style="margin:0 0 14px; font-size:12.5px;">${escapeHtml(g.kind)} · ${fmtDate(g.date)} · ${animals.length} animal${animals.length===1?'':'s'}</p>
+    <div style="border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--white); max-height:420px; overflow-y:auto;">
+      ${animals.map(a=>`<div class="mini-row" style="padding:8px 10px; cursor:pointer;" onclick="closeModal(); openDrawer('${a.id}')">
+        <span>${eartag(a)} <span class="muted" style="font-size:11.5px;">${escapeHtml(classLabel(a))}</span></span>
+        <span class="d">${a.pasture ? '📍 '+escapeHtml(a.pasture) : 'No pasture'}</span>
+      </div>`).join('')}
+    </div>
+    <div class="modal-actions"><button type="button" class="btn rust" onclick="closeModal()">Done</button></div>`;
+  document.getElementById('modal-root').innerHTML = modalShell(escapeHtml(g.label), body);
 }
 
 function taskUrgency(days){
@@ -1183,10 +1193,13 @@ function viewDashboard(){
   const calves = active.filter(a=>a.klass==='Bull Calf' || a.klass==='Heifer Calf').length;
   const pairsCount = active.filter(a=>a.klass==='Cow').filter(cow => active.some(c=>c.damId===cow.tagId)).length;
 
-  const tasks = getUpcomingTasks().slice(0,8);
-  const overdueCount = getUpcomingTasks().filter(t=>t.days<0).length;
+  const allTasks = getUpcomingTasks();
+  const tasks = allTasks.slice(0,10);
+  upcomingCache = tasks;
+  const overdueCount = allTasks.filter(t=>t.days<0).length;
 
-  const recentEvents = [...state.events].sort((a,b)=> a.date<b.date?1:-1).slice(0,6);
+  // Future-dated events are upcoming, not recent.
+  const recentEvents = state.events.filter(ev=> !ev.date || ev.date <= todayStr()).sort((a,b)=> a.date<b.date?1:-1).slice(0,6);
 
   return `
     <div class="grid stat-grid">
@@ -1201,17 +1214,18 @@ function viewDashboard(){
 
     <div class="panel">
       <h2>Upcoming &amp; overdue <button class="btn ghost sm" onclick="setTab('health')">Log an event</button></h2>
-      <p class="sub">Vaccination and treatment follow-ups, weaning windows, and expected calving dates.</p>
+      <p class="sub">Scheduled events, follow-ups, weaning windows and expected calvings. Click one to see the animals.</p>
       ${tasks.length===0 ? `<div class="empty-state"><div class="icon">📋</div><h3>Nothing on the books</h3><p>Add breeding, health, or calf records to see reminders here.</p></div>` :
       `<div class="task-list">
-        ${tasks.map(t=>{
+        ${tasks.map((t, idx)=>{
           const urg = taskUrgency(t.days);
           const when = t.days<0 ? `${Math.abs(t.days)}d overdue` : t.days===0 ? 'today' : `in ${t.days}d`;
-          return `<div class="task-item">
+          const n = t.animalIds.length;
+          return `<div class="task-item" style="cursor:pointer;" onclick="openUpcomingGroup(${idx})">
             <div class="task-dot ${urg}"></div>
             <div class="task-body">
-              <div class="task-title">${escapeHtml(t.title)}</div>
-              <div class="task-sub">${escapeHtml(t.sub)} · ${fmtDate(t.date)}</div>
+              <div class="task-title">${escapeHtml(t.label)} <span class="muted" style="font-weight:500;">— ${n} animal${n===1?'':'s'}</span></div>
+              <div class="task-sub">${escapeHtml(t.kind)} · ${fmtDate(t.date)}</div>
             </div>
             <div class="task-when ${urg}">${when}</div>
           </div>`;
