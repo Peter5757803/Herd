@@ -911,7 +911,6 @@ function breedOptionsHtml(selected){
   names.forEach(n=>{
     html += `<option value="${escapeHtml(n)}" ${n===selected?'selected':''}>${escapeHtml(n)}</option>`;
   });
-  html += `<option value="__add_new__">+ Add new breed…</option>`;
   return html;
 }
 // Pasture dropdown for the animal form: every pasture in the library (plus any in use on animals), her current one selected.
@@ -920,34 +919,10 @@ function pastureSelectOptionsHtml(selected){
   const names = [...new Set([...state.pastures.map(p=>p.name), ...Object.keys(getPastureGroups()), cur].filter(Boolean))]
     .sort((x,y)=>x.localeCompare(y, undefined, { numeric:true }));
   return `<option value="" ${cur?'':'selected'}>— No pasture —</option>`
-    + names.map(n=>`<option value="${escapeHtml(n)}" ${n===cur?'selected':''}>${escapeHtml(n)}${n===cur?' (current)':''}</option>`).join('')
-    + `<option value="__add_new__">+ Add new pasture…</option>`;
+    + names.map(n=>`<option value="${escapeHtml(n)}" ${n===cur?'selected':''}>${escapeHtml(n)}${n===cur?' (current)':''}</option>`).join('');
 }
-function handlePastureSelectChange(selectEl){
-  if(selectEl.value !== '__add_new__'){ selectEl.dataset.prev = selectEl.value; return; }
-  const name = (prompt('New pasture name (e.g. North 40):') || '').trim();
-  if(!name){ selectEl.value = selectEl.dataset.prev || ''; return; }
-  ensurePastureExists(name);
-  saveState();
-  const existing = state.pastures.find(p=>p.name.toLowerCase()===name.toLowerCase());
-  const chosen = existing ? existing.name : name;
-  selectEl.innerHTML = pastureSelectOptionsHtml(chosen);
-  selectEl.dataset.prev = chosen;
-}
+// Breeds, vaccines and pastures are only added in Settings; the forms just pick from those libraries.
 function handleBreedSelectChange(selectEl){
-  if(selectEl.value === '__add_new__'){
-    const name = (prompt('Add a new breed (e.g. Angus, Hereford, Simmental):') || '').trim();
-    if(name){
-      ensureBreedExists(name);
-      saveState();
-      selectEl.innerHTML = breedOptionsHtml(name);
-      selectEl.dataset.prev = name;
-    } else {
-      selectEl.value = selectEl.dataset.prev || '';
-    }
-  } else {
-    selectEl.dataset.prev = selectEl.value;
-  }
   const dot = document.getElementById('breed-color-dot');
   if(dot) dot.style.background = breedColor(selectEl.value);
 }
@@ -1009,18 +984,8 @@ function ensureVaccineExists(name){
 function vaccineChecklistHtml(checkedNames){
   const checked = new Set((checkedNames||[]).map(n=>n.toLowerCase()));
   const names = state.vaccines.slice().sort((a,b)=>a.localeCompare(b));
-  if(names.length===0) return `<p class="hint" style="margin:4px 6px;">No vaccines in the library yet — add one below.</p>`;
+  if(names.length===0) return `<p class="hint" style="margin:4px 6px;">No vaccines in the library yet — add them in Settings ⚙ → Vaccine library.</p>`;
   return names.map(n=>`<label class="checkbox-row"><input type="checkbox" name="vaccines" value="${escapeHtml(n)}" ${checked.has(n.toLowerCase())?'checked':''}> ${escapeHtml(n)}</label>`).join('');
-}
-function addVaccineFromEventForm(){
-  const name = (prompt('Add a new vaccine (e.g. Bovi-Shield Gold, 7-way Blackleg):') || '').trim();
-  if(!name) return;
-  const list = document.getElementById('vaccine-checklist');
-  const current = list ? Array.from(list.querySelectorAll('input[name="vaccines"]:checked')).map(cb=>cb.value) : [];
-  ensureVaccineExists(name);
-  saveState();
-  const canonical = state.vaccines.find(v=>v.toLowerCase()===name.toLowerCase()) || name;
-  if(list) list.innerHTML = vaccineChecklistHtml(current.concat(canonical));
 }
 function selectedVaccines(form){
   return Array.from(form.querySelectorAll('input[name="vaccines"]:checked')).map(cb=>cb.value);
@@ -1688,8 +1653,11 @@ function openMoveModal(title, animalIds){
     <p class="hint" style="margin-bottom:14px; font-size:12.5px;">${escapeHtml(title)}</p>
     <div class="field">
       <label>Move to pasture</label>
-      <input type="text" id="move-dest-input" list="pasture-options-move" placeholder="Choose an existing pasture or type a new one">
-      ${pastureOptionsDatalist('pasture-options-move')}
+      <select id="move-dest-input">
+        <option value="">— Choose a pasture —</option>
+        ${[...new Set([...state.pastures.map(p=>p.name), ...Object.keys(getPastureGroups())])].sort((x,y)=>x.localeCompare(y, undefined, { numeric:true })).map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}
+      </select>
+      <p class="hint">Pastures are added in Settings ⚙ → Pasture library.</p>
     </div>
     <div class="modal-actions">
       <button type="button" class="btn ghost" onclick="confirmUnassignMove()">Unassign (remove pasture)</button>
@@ -1703,8 +1671,7 @@ function openMoveModal(title, animalIds){
 function confirmMove(){
   const input = document.getElementById('move-dest-input');
   const dest = input.value.trim();
-  if(!dest){ toast('Enter or choose a pasture name'); return; }
-  ensurePastureExists(dest);
+  if(!dest){ toast('Choose a pasture'); return; }
   moveModalIds.forEach(id=>{ const a=animalById(id); if(a) a.pasture = dest; });
   const count = moveModalIds.length;
   selectedAnimalIds.clear();
@@ -2531,6 +2498,7 @@ function openAnimalModal(presetKlass, editId){
             <span id="breed-color-dot" style="width:11px; height:11px; border-radius:50%; flex-shrink:0; background:${breedColor(a.breed)}; border:1px solid rgba(0,0,0,0.15);"></span>
             <select name="breed" id="breed-select" data-prev="${escapeHtml(a.breed)}" onchange="handleBreedSelectChange(this)" style="flex:1;">${breedOptionsHtml(a.breed)}</select>
           </div>
+          <p class="hint">Breeds are added in Settings ⚙ → Breed library.</p>
         </div>
       </div>
       <div class="field-row three">
@@ -2574,7 +2542,7 @@ function openAnimalModal(presetKlass, editId){
         <div class="field"><label>Dam (if calf)</label><select name="damId">${damOptionsHtml(a.damId, a.tagId)}</select></div>
         <div class="field"><label>Sire</label><input type="text" name="sireId" list="sire-options" value="${escapeHtml(nameForTag(a.sireId)==='—' ? '' : nameForTag(a.sireId))}" placeholder="Bull's name, or 'AI'"><datalist id="sire-options">${state.animals.filter(x=>x.klass==='Bull').sort(byName).map(x=>`<option value="${escapeHtml(displayName(x))}">`).join('')}</datalist></div>
       </div>
-      <div class="field"><label>Pasture / location</label><select name="pasture" id="animal-pasture-select" data-prev="${escapeHtml(a.pasture||'')}" onchange="handlePastureSelectChange(this)">${pastureSelectOptionsHtml(a.pasture)}</select></div>
+      <div class="field"><label>Pasture / location</label><select name="pasture" id="animal-pasture-select">${pastureSelectOptionsHtml(a.pasture)}</select><p class="hint">Pastures are added in Settings ⚙ → Pasture library.</p></div>
       <div class="field"><label>Notes</label><textarea name="notes" placeholder="Temperament, markings, anything worth remembering">${escapeHtml(a.notes)}</textarea></div>
       <div class="modal-actions">
         ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deleteAnimal('${a.id}')">Delete</button>`:''}
@@ -2637,7 +2605,7 @@ function saveAnimal(evt, id, editing){
     status: f.status.value,
     damId: f.damId.value.trim(),
     sireId: sireRefFromInput(f.sireId.value),
-    pasture: f.pasture.value==='__add_new__' ? '' : f.pasture.value.trim(),
+    pasture: f.pasture.value.trim(),
     notes: f.notes.value.trim(),
     salePrice: f.status.value==='sold' && f.salePrice.value ? Number(f.salePrice.value) : '',
     photo: animalFormPhoto,
@@ -3068,7 +3036,7 @@ function openEventModal(presetAnimalId){
       <div id="vaccine-field" style="display:none;" class="field">
         <label>Vaccines</label>
         <div class="checkbox-list" id="vaccine-checklist">${vaccineChecklistHtml([])}</div>
-        <button type="button" class="btn ghost sm" style="margin-top:8px;" onclick="addVaccineFromEventForm()">+ Add new vaccine</button>
+        <p class="hint">Vaccines are added in Settings ⚙ → Vaccine library.</p>
       </div>
       <div id="calving-fields" style="display:none;">
         <div class="field-row">
