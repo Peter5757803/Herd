@@ -1424,8 +1424,6 @@ function viewPastures(){
           </div>
           <div class="modal-actions" style="justify-content:flex-start; padding:0; margin-top:14px;">
             <button class="btn rust sm" ${animals.length===0?'disabled':''} onclick="viewAnimalsInPasture(pastureGroupNamesCache[${idx}])">View animals (${animals.length})</button>
-            <button class="btn ghost sm" ${animals.length===0?'disabled':''} onclick="openGroupMoveModal(${idx})">Move group</button>
-            ${lib ? `<button class="btn ghost sm" style="color:var(--danger);" onclick="deletePasture('${lib.id}')">Delete</button>` : ''}
           </div>
         </div>`;
       }).join('')}
@@ -1488,8 +1486,28 @@ function openPastureModal(editId){
         <p class="hint">Optional — a quick reference shot of the gate, water source, or layout. Resized automatically.</p>
       </div>
       <div class="field"><label>Notes</label><textarea name="notes" placeholder="Water source, fence condition, grazing plan…">${escapeHtml(p.notes)}</textarea></div>
+      ${editing ? (()=>{
+        const herd = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===p.name);
+        return `
+      <div class="field" style="background:var(--surface-2); padding:12px 14px; border-radius:var(--radius);">
+        <label style="margin-bottom:6px;">Animals in this pasture</label>
+        <p class="hint" style="margin:0 0 10px;">${herd.length} head currently here.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn rust sm" ${herd.length===0?'disabled':''} onclick="movePastureGroup('${p.id}')">Move group</button>
+          <button type="button" class="btn ghost sm" ${herd.length===0?'disabled':''} onclick="closeModal(); viewAnimalsInPasture(${escapeHtml(JSON.stringify(p.name))})">View animals</button>
+        </div>
+      </div>
+      <div class="field" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--line-soft);">
+        <label style="color:var(--danger);">Delete pasture</label>
+        <p class="hint" style="margin:0 0 10px;">Removes this pasture from the library.${herd.length? ` The ${herd.length} animal${herd.length===1?'':'s'} here will become unassigned (they are not deleted).` : ''}</p>
+        <button type="button" id="pasture-delete-hold" class="hold-reset-btn"
+          onmousedown="startPastureDeleteHold('${p.id}')" onmouseup="cancelPastureDeleteHold()" onmouseleave="cancelPastureDeleteHold()"
+          ontouchstart="event.preventDefault(); startPastureDeleteHold('${p.id}')" ontouchend="cancelPastureDeleteHold()" ontouchcancel="cancelPastureDeleteHold()">
+          <div id="pasture-delete-fill" class="hold-reset-fill"></div>
+          <span class="hold-reset-label" id="pasture-delete-label">Press and hold 10s to delete this pasture</span>
+        </button>
+      </div>`; })() : ''}
       <div class="modal-actions">
-        ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deletePasture('${p.id}')">Delete</button>`:''}
         <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
         <button type="submit" class="btn rust">${editing?'Save changes':'Add pasture'}</button>
       </div>
@@ -1565,14 +1583,52 @@ function savePasture(evt, id, editing){
   render();
   toast(editing? 'Pasture updated' : 'Pasture added');
 }
+// Deleting a pasture needs a 10-second press-and-hold in its Edit window.
+const PASTURE_DELETE_HOLD_MS = 10000;
+let pastureHoldRAF = null;
+function startPastureDeleteHold(id){
+  if(pastureHoldRAF) return;
+  const btn = document.getElementById('pasture-delete-hold');
+  if(!btn) return;
+  btn.classList.add('holding');
+  const start = Date.now();
+  const step = ()=>{
+    const fill = document.getElementById('pasture-delete-fill');
+    const label = document.getElementById('pasture-delete-label');
+    if(!fill || !label){ cancelPastureDeleteHold(); return; }
+    const elapsed = Date.now() - start;
+    fill.style.width = Math.min(100, elapsed / PASTURE_DELETE_HOLD_MS * 100) + '%';
+    if(elapsed >= PASTURE_DELETE_HOLD_MS){
+      pastureHoldRAF = null;
+      label.textContent = 'Deleting…';
+      deletePasture(id);
+      return;
+    }
+    label.textContent = `Keep holding… ${Math.ceil((PASTURE_DELETE_HOLD_MS - elapsed)/1000)}s`;
+    pastureHoldRAF = requestAnimationFrame(step);
+  };
+  pastureHoldRAF = requestAnimationFrame(step);
+}
+function cancelPastureDeleteHold(){
+  if(pastureHoldRAF) cancelAnimationFrame(pastureHoldRAF);
+  pastureHoldRAF = null;
+  const btn = document.getElementById('pasture-delete-hold');
+  const fill = document.getElementById('pasture-delete-fill');
+  const label = document.getElementById('pasture-delete-label');
+  if(btn) btn.classList.remove('holding');
+  if(fill) fill.style.width = '0%';
+  if(label) label.textContent = 'Press and hold 10s to delete this pasture';
+}
+function movePastureGroup(id){
+  const p = state.pastures.find(x=>x.id===id);
+  if(!p) return;
+  const animals = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===p.name);
+  if(animals.length===0){ toast('No animals in this pasture'); return; }
+  openMoveModal(`Moving ${animals.length} animal${animals.length===1?'':'s'} currently in "${p.name}".`, animals.map(a=>a.id));
+}
 function deletePasture(id){
   const p = state.pastures.find(x=>x.id===id);
   if(!p) return;
-  const affected = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===p.name).length;
-  const msg = affected>0
-    ? `Delete "${p.name}"? ${affected} animal${affected===1?'':'s'} currently assigned here will become unassigned.`
-    : `Delete "${p.name}"?`;
-  if(!confirm(msg)) return;
   state.animals.forEach(a=>{ if((a.pasture||'').trim()===p.name) a.pasture=''; });
   state.pastures = state.pastures.filter(x=>x.id!==id);
   saveState();
@@ -1583,12 +1639,6 @@ function deletePasture(id){
 
 /* ---------- Move group / bulk move modal ---------- */
 let moveModalIds = [];
-function openGroupMoveModal(idx){
-  const name = pastureGroupNamesCache[idx];
-  const animals = state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===name);
-  if(animals.length===0){ toast('No animals in this group'); return; }
-  openMoveModal(`Moving ${animals.length} animal${animals.length===1?'':'s'} currently in "${name}".`, animals.map(a=>a.id));
-}
 function openUnassignedMoveModal(){
   const animals = unassignedAnimals();
   if(animals.length===0){ toast('No unassigned animals'); return; }
