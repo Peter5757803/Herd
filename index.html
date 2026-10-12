@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rangebook — Herd Management</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rye&family=Roboto+Slab:wght@500;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
@@ -458,6 +458,120 @@
     font-size:13px; font-weight:600; box-shadow:var(--shadow-lg); animation:toastIn .15s ease;
   }
   @keyframes toastIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+
+  /* =========================================================
+     WESTERN THEME — leather, brass, parchment and rope.
+     Layered over the base styles above; only looks change.
+  ========================================================= */
+  :root{
+    --bg: #E6D6B4;
+    --bg-2: #D9C397;
+    --surface: #F8EFD9;
+    --surface-2: #EFE0BF;
+    --ink: #2E1D10;
+    --ink-soft: #6A4E33;
+    --ink-faint: #9A7D5C;
+    --line: #C4A574;
+    --line-soft: #DCC69C;
+    --rust: #8E3B1C;        /* saddle red */
+    --rust-dark: #6B2B13;
+    --leather: #4A2C17;
+    --leather-2: #5E3920;
+    --brass: #C8973F;
+    --brass-light: #E2B65C;
+    --turquoise: #2F8A86;
+    --pasture: #4F6B2F;
+    --pasture-dark: #3A5121;
+    --tag: #B8732A;
+    --tag-dark: #8A5418;
+  }
+  html, body{ overflow-x: clip; }
+  body{
+    /* parchment with a faint grain */
+    background:
+      radial-gradient(ellipse at 20% 0%, rgba(255,250,235,0.55), transparent 55%),
+      radial-gradient(ellipse at 90% 100%, rgba(120,80,30,0.12), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(90,60,25,0.025) 0 2px, transparent 2px 5px),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    background-attachment: fixed;
+  }
+  .rye, .brand h1, .section-title, .panel h2, .modal-head h3, .drawer-title, .stat-card .num, .pasture-name, .empty-state h3{
+    font-family: 'Rye', 'Roboto Slab', serif; font-weight: 400; letter-spacing: 0.01em;
+  }
+
+  /* Header: dark tooled-leather band, full width, with stitching */
+  .topbar{ position: relative; padding: 18px 0; margin-bottom: 18px; }
+  .topbar::before{
+    content:""; position:absolute; top:0; bottom:0; left:calc(50% - 50vw); right:calc(50% - 50vw); z-index:-1;
+    background:
+      repeating-linear-gradient(115deg, rgba(255,255,255,0.025) 0 3px, transparent 3px 9px),
+      linear-gradient(180deg, var(--leather-2), var(--leather));
+    border-bottom: 4px solid var(--brass);
+    box-shadow: inset 0 -10px 0 -6px rgba(0,0,0,0.25), 0 3px 10px rgba(46,29,16,0.25);
+  }
+  .topbar::after{
+    content:""; position:absolute; left:calc(50% - 50vw + 8px); right:calc(50% - 50vw + 8px); bottom:8px; z-index:-1;
+    border-bottom: 2px dashed rgba(226,182,92,0.55);
+  }
+  .brand h1{ color: #F6E7C8; font-size: 26px; text-shadow: 0 2px 0 rgba(0,0,0,0.35); }
+  .brand p{ color: var(--brass-light); letter-spacing: 0.14em; }
+  .brand-mark{ background: #F6E7C8; box-shadow: inset 0 0 0 2px var(--brass), 0 0 0 2px var(--leather); }
+  .topbar .search-input{ background: #FBF3E1; border-color: var(--brass); }
+  .icon-btn{ background: #F6E7C8; border-color: var(--brass); color: var(--leather); }
+  .icon-btn:hover{ background: #FFF6E2; }
+  .icon-btn .drive-dot{ border-color: #F6E7C8; }
+
+  /* Tabs: brass underline on the active one, rope rule under the row */
+  .tabs{
+    border-bottom: none; padding-bottom: 6px; margin-bottom: 24px;
+    background: repeating-linear-gradient(135deg, var(--line) 0 3px, transparent 3px 6px) bottom / 100% 4px no-repeat;
+  }
+  .tab{ text-transform: uppercase; letter-spacing: 0.08em; font-size: 12.5px; border-bottom-width: 3px; }
+  .tab.active{ color: var(--rust); border-bottom-color: var(--brass); }
+  .tab.active .count{ background: var(--rust); }
+
+  /* Cards & panels: tooled leather edge with stitching */
+  .panel, .stat-card, .pasture-card, .pair-card{
+    border: 1px solid var(--line);
+    outline: 1px dashed rgba(142,59,28,0.28); outline-offset: -6px;
+    box-shadow: 0 1px 0 rgba(46,29,16,0.08), 0 4px 12px rgba(46,29,16,0.10);
+  }
+  .stat-card{ text-align: left; position: relative; }
+  .stat-card .num{ font-size: 32px; color: var(--leather); }
+  .stat-card .label::before{ content: "★ "; color: var(--brass); }
+  .stat-card.accent .num{ color: var(--rust); }
+  .panel h2{ font-size: 18px; }
+  .panel h2 .btn, .modal-head .btn{ font-family: 'Public Sans', sans-serif; font-weight: 600; letter-spacing: 0; white-space: nowrap; }
+  .section-title{ font-size: 21px; }
+
+  /* Buttons: leather and brass */
+  .btn{ background: var(--leather); border-color: var(--leather); }
+  .btn.rust{ background: linear-gradient(180deg, #9E4523, var(--rust)); border-color: var(--rust-dark); box-shadow: inset 0 1px 0 rgba(255,255,255,0.15); }
+  .btn.rust:hover{ background: var(--rust-dark); }
+  .btn.ghost{ background: #FBF3E1; color: var(--leather); border-color: var(--line); }
+  .btn.ghost:hover{ background: var(--surface-2); border-color: var(--brass); }
+  .chip.active{ background: var(--leather); border-color: var(--leather); }
+
+  /* Ledger: header row like a brand registry */
+  .ledger thead th{ color: var(--leather); border-bottom: 3px double var(--line); }
+  .ledger tbody tr:hover{ background: rgba(200,151,63,0.10); }
+
+  /* Ear tags keep their colours, with a brass grommet */
+  .eartag::before{ background: var(--brass-light); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); }
+
+  /* Windows: parchment with a leather title bar rule */
+  .modal, .drawer{ background: var(--surface); border-top: 6px solid var(--leather); }
+  .modal-head{ border-bottom: 2px dashed var(--line); padding-bottom: 12px; }
+  .drawer-section{ border-top: 2px dashed var(--line-soft); }
+  .toast{ background: var(--leather); border: 1px solid var(--brass); }
+  .task-dot.ok{ background: var(--turquoise); }
+  .task-when.ok{ color: var(--turquoise); }
+  .bulk-bar{ border-color: var(--brass); }
+
+  @media (max-width:640px){
+    .brand h1{ font-size: 21px; }
+    .topbar{ padding: 14px 0 20px; }
+  }
 </style>
 </head>
 <body>
@@ -465,16 +579,17 @@
   <div class="topbar">
     <div class="brand">
       <div class="brand-mark">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M4 10c0-3 2.5-6 8-6s8 3 8 6c0 4-2 5-2 8 0 1.5-1 2-2 2H8c-1 0-2-.5-2-2 0-3-2-4-2-8z" fill="#F7F2E4"/>
-          <circle cx="9" cy="11" r="1.1" fill="#2A2318"/>
-          <circle cx="15" cy="11" r="1.1" fill="#2A2318"/>
-          <path d="M6 8l-2-3M18 8l2-3" stroke="#F7F2E4" stroke-width="1.4" stroke-linecap="round"/>
+        <!-- Horseshoe brand mark -->
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 21V11a6 6 0 0 1 12 0v10" stroke="#E2B65C" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="6.2" cy="12.5" r="0.9" fill="#3B2414"/><circle cx="6.6" cy="16.5" r="0.9" fill="#3B2414"/>
+          <circle cx="17.8" cy="12.5" r="0.9" fill="#3B2414"/><circle cx="17.4" cy="16.5" r="0.9" fill="#3B2414"/>
+          <circle cx="9" cy="7" r="0.9" fill="#3B2414"/><circle cx="15" cy="7" r="0.9" fill="#3B2414"/>
         </svg>
       </div>
       <div>
         <h1>Rangebook</h1>
-        <p>Cow / Calf Herd Ledger</p>
+        <p>★ Cow / Calf Herd Ledger ★</p>
       </div>
     </div>
     <div class="global-search-wrap" id="global-search-wrap">
