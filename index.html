@@ -914,6 +914,26 @@ function breedOptionsHtml(selected){
   html += `<option value="__add_new__">+ Add new breed…</option>`;
   return html;
 }
+// Pasture dropdown for the animal form: every pasture in the library (plus any in use on animals), her current one selected.
+function pastureSelectOptionsHtml(selected){
+  const cur = (selected||'').trim();
+  const names = [...new Set([...state.pastures.map(p=>p.name), ...Object.keys(getPastureGroups()), cur].filter(Boolean))]
+    .sort((x,y)=>x.localeCompare(y, undefined, { numeric:true }));
+  return `<option value="" ${cur?'':'selected'}>— No pasture —</option>`
+    + names.map(n=>`<option value="${escapeHtml(n)}" ${n===cur?'selected':''}>${escapeHtml(n)}${n===cur?' (current)':''}</option>`).join('')
+    + `<option value="__add_new__">+ Add new pasture…</option>`;
+}
+function handlePastureSelectChange(selectEl){
+  if(selectEl.value !== '__add_new__'){ selectEl.dataset.prev = selectEl.value; return; }
+  const name = (prompt('New pasture name (e.g. North 40):') || '').trim();
+  if(!name){ selectEl.value = selectEl.dataset.prev || ''; return; }
+  ensurePastureExists(name);
+  saveState();
+  const existing = state.pastures.find(p=>p.name.toLowerCase()===name.toLowerCase());
+  const chosen = existing ? existing.name : name;
+  selectEl.innerHTML = pastureSelectOptionsHtml(chosen);
+  selectEl.dataset.prev = chosen;
+}
 function handleBreedSelectChange(selectEl){
   if(selectEl.value === '__add_new__'){
     const name = (prompt('Add a new breed (e.g. Angus, Hereford, Simmental):') || '').trim();
@@ -2554,7 +2574,7 @@ function openAnimalModal(presetKlass, editId){
         <div class="field"><label>Dam (if calf)</label><select name="damId">${damOptionsHtml(a.damId, a.tagId)}</select></div>
         <div class="field"><label>Sire</label><input type="text" name="sireId" list="sire-options" value="${escapeHtml(nameForTag(a.sireId)==='—' ? '' : nameForTag(a.sireId))}" placeholder="Bull's name, or 'AI'"><datalist id="sire-options">${state.animals.filter(x=>x.klass==='Bull').sort(byName).map(x=>`<option value="${escapeHtml(displayName(x))}">`).join('')}</datalist></div>
       </div>
-      <div class="field"><label>Pasture / location</label><input type="text" name="pasture" list="pasture-options-animal" value="${escapeHtml(a.pasture)}" placeholder="e.g. North 40">${pastureOptionsDatalist('pasture-options-animal')}</div>
+      <div class="field"><label>Pasture / location</label><select name="pasture" id="animal-pasture-select" data-prev="${escapeHtml(a.pasture||'')}" onchange="handlePastureSelectChange(this)">${pastureSelectOptionsHtml(a.pasture)}</select></div>
       <div class="field"><label>Notes</label><textarea name="notes" placeholder="Temperament, markings, anything worth remembering">${escapeHtml(a.notes)}</textarea></div>
       <div class="modal-actions">
         ${editing? `<button type="button" class="btn danger" style="margin-right:auto;" onclick="deleteAnimal('${a.id}')">Delete</button>`:''}
@@ -2617,7 +2637,7 @@ function saveAnimal(evt, id, editing){
     status: f.status.value,
     damId: f.damId.value.trim(),
     sireId: sireRefFromInput(f.sireId.value),
-    pasture: f.pasture.value.trim(),
+    pasture: f.pasture.value==='__add_new__' ? '' : f.pasture.value.trim(),
     notes: f.notes.value.trim(),
     salePrice: f.status.value==='sold' && f.salePrice.value ? Number(f.salePrice.value) : '',
     photo: animalFormPhoto,
