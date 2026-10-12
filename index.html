@@ -1396,13 +1396,9 @@ function viewPastures(){
   const unassigned = unassignedAnimals();
 
   return `
-    <div class="toolbar">
-      <div class="section-title" style="margin:0;">Pasture library</div>
-      <div style="flex:1;"></div>
-      <button class="btn rust" onclick="openPastureModal()">+ Add pasture</button>
-    </div>
-    <p class="section-desc">Keep a running list of your pastures and paddocks, and move whole groups of animals between them in one step.</p>
-    ${names.length===0 && unassigned.length===0 ? `<div class="empty-state"><div class="icon">🌾</div><h3>No pastures yet</h3><p>Add your first pasture to start tracking where the herd is grazing.</p><button class="btn rust" onclick="openPastureModal()">+ Add pasture</button></div>` :
+    <div class="section-title">Pastures</div>
+    <p class="section-desc">Where the herd is grazing. Add, edit, move groups or delete pastures in <b>Settings ⚙ → Pasture library</b>.</p>
+    ${names.length===0 && unassigned.length===0 ? `<div class="empty-state"><div class="icon">🌾</div><h3>No pastures yet</h3><p>Add pastures in Settings ⚙ → Pasture library.</p></div>` :
     `<div class="pasture-grid">
       ${names.map((name, idx)=>{
         const animals = groups[name];
@@ -1414,7 +1410,6 @@ function viewPastures(){
               <div class="pasture-name">${escapeHtml(name)}</div>
               <div class="pasture-meta">${animals.length} head${lib && lib.acres? ' · '+escapeHtml(lib.acres)+' ac':''}</div>
             </div>
-            ${lib ? `<button class="btn ghost sm" onclick="openPastureModal('${lib.id}')">Edit</button>` : `<button class="btn ghost sm" onclick="addPastureFromGroup(${idx})">Add to library</button>`}
           </div>
           ${lib && lib.notes ? `<p class="pasture-notes">${escapeHtml(lib.notes)}</p>` : ''}
           <div class="pasture-tags">
@@ -1440,7 +1435,6 @@ function viewPastures(){
         </div>
         <div class="modal-actions" style="justify-content:flex-start; padding:0; margin-top:14px;">
           <button class="btn rust sm" onclick="viewAnimalsInPasture('__none__')">View animals (${unassigned.length})</button>
-          <button class="btn ghost sm" onclick="openUnassignedMoveModal()">Move group</button>
         </div>
       </div>` : ''}
     </div>`}
@@ -1453,12 +1447,35 @@ function viewAnimalsInPasture(name){
   setTab('animals');
   window.scrollTo(0, 0);
 }
-function addPastureFromGroup(idx){
-  const name = pastureGroupNamesCache[idx];
+function addPastureByName(name){
   ensurePastureExists(name);
   saveState();
   render();
+  refreshPastureLibrary();
   toast('Added to pasture library');
+}
+
+/* ---------- Pasture library (Settings) ---------- */
+// Pastures are added, edited, moved and deleted here; the Pastures tab only shows them.
+function renderPastureLibrary(){
+  const headIn = name=> state.animals.filter(a=>isActive(a) && (a.pasture||'').trim()===name).length;
+  const lib = state.pastures.slice().sort((a,b)=>a.name.localeCompare(b.name, undefined, { numeric:true }));
+  const unlisted = Object.keys(getPastureGroups()).filter(n=> !state.pastures.some(p=>p.name===n)).sort();
+  if(!lib.length && !unlisted.length) return `<p class="hint" style="margin:0;">No pastures yet.</p>`;
+  return `<div style="border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--white);">
+    ${lib.map(p=>`<div class="mini-row" style="padding:8px 10px;">
+      <span><span class="t">${escapeHtml(p.name)}</span> <span class="muted" style="font-size:11.5px;">· ${headIn(p.name)} head${p.acres? ' · '+escapeHtml(p.acres)+' ac':''}</span></span>
+      <button type="button" class="btn ghost sm" onclick="openPastureModal('${p.id}', true)">Edit</button>
+    </div>`).join('')}
+    ${unlisted.map(n=>`<div class="mini-row" style="padding:8px 10px;">
+      <span><span class="t">${escapeHtml(n)}</span> <span class="muted" style="font-size:11.5px;">· ${headIn(n)} head · not in library yet</span></span>
+      <button type="button" class="btn ghost sm" onclick="addPastureByName(${escapeHtml(JSON.stringify(n))})">Add</button>
+    </div>`).join('')}
+  </div>`;
+}
+function refreshPastureLibrary(){
+  const el = document.getElementById('pasture-library-list');
+  if(el) el.innerHTML = renderPastureLibrary();
 }
 
 let pastureFormPhoto = null;
@@ -1469,7 +1486,13 @@ function renderPastureModalPhotoBlock(){
   }
   return `<p class="hint" style="margin:0 0 8px;">No photo yet.</p>`;
 }
-function openPastureModal(editId){
+let pastureModalFromSettings = false;
+function closePastureModal(){
+  closeModal();
+  if(pastureModalFromSettings){ pastureModalFromSettings = false; openSettingsModal('pasture-library-section'); }
+}
+function openPastureModal(editId, fromSettings){
+  pastureModalFromSettings = !!fromSettings;
   const editing = editId ? state.pastures.find(p=>p.id===editId) : null;
   const p = editing || { id:uid(), name:'', acres:'', notes:'', photo:null };
   pastureFormPhoto = p.photo || null;
@@ -1508,7 +1531,7 @@ function openPastureModal(editId){
         </button>
       </div>`; })() : ''}
       <div class="modal-actions">
-        <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn ghost" onclick="closePastureModal()">${pastureModalFromSettings ? '← Back' : 'Cancel'}</button>
         <button type="submit" class="btn rust">${editing?'Save changes':'Add pasture'}</button>
       </div>
     </form>
@@ -1579,7 +1602,7 @@ function savePasture(evt, id, editing){
     state.pastures.push({ id, name, acres, notes, photo });
   }
   saveState();
-  closeModal();
+  closePastureModal();
   render();
   toast(editing? 'Pasture updated' : 'Pasture added');
 }
@@ -1632,18 +1655,13 @@ function deletePasture(id){
   state.animals.forEach(a=>{ if((a.pasture||'').trim()===p.name) a.pasture=''; });
   state.pastures = state.pastures.filter(x=>x.id!==id);
   saveState();
-  closeModal();
+  closePastureModal();
   render();
   toast('Pasture deleted');
 }
 
 /* ---------- Move group / bulk move modal ---------- */
 let moveModalIds = [];
-function openUnassignedMoveModal(){
-  const animals = unassignedAnimals();
-  if(animals.length===0){ toast('No unassigned animals'); return; }
-  openMoveModal(`Assigning ${animals.length} unassigned animal${animals.length===1?'':'s'} to a pasture.`, animals.map(a=>a.id));
-}
 function openMoveModal(title, animalIds){
   moveModalIds = animalIds.slice();
   const body = `
@@ -2332,7 +2350,8 @@ async function testDriveConnection(){
 }
 
 /* ---------- Settings modal ---------- */
-function openSettingsModal(){
+function openSettingsModal(scrollTo){
+  setTimeout(()=>{ const el = scrollTo && document.getElementById(scrollTo); if(el) el.scrollIntoView({ block:'start' }); }, 0);
   const body = `
     <div class="field">
       <label>Herd data</label>
@@ -2356,6 +2375,12 @@ function openSettingsModal(){
         <button type="button" class="btn ghost sm" onclick="addVaccineFromSettings()">Add</button>
       </div>
       <div id="vaccine-chip-list">${renderVaccineChips()}</div>
+    </div>
+    <div class="field" id="pasture-library-section" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
+      <label>Pasture library</label>
+      <p class="hint" style="margin:0 0 10px;">Add pastures and edit their name, acres, notes and photo. Edit is also where you move a pasture's group or delete it.</p>
+      <button type="button" class="btn ghost sm" style="margin-bottom:12px;" onclick="openPastureModal(null, true)">+ Add pasture</button>
+      <div id="pasture-library-list">${renderPastureLibrary()}</div>
     </div>
     <div class="field" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line-soft);">
       <label style="color:var(--danger);">Danger zone</label>
