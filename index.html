@@ -3428,38 +3428,18 @@ function handleGlobalSearchInput(q){
     box.innerHTML = `<div class="global-search-empty">No animals match "${escapeHtml(q)}"</div>`;
   } else {
     box.innerHTML = matches.map(a=>{
-      const canBreed = a.klass==='Cow' || a.klass==='Heifer';
-      return `<div class="global-search-row">
-        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer;" onclick="selectGlobalSearchResult('${a.id}')">
+      const pasture = (a.pasture||'').trim();
+      return `<div class="global-search-row" onclick="selectGlobalSearchResult('${a.id}')">
+        <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
           ${eartag(a)}
           <span class="gs-meta">${classLabel(a)}${a.breed? ' · '+escapeHtml(a.breed):''}</span>
         </div>
         ${a.status!=="active"? `<span class="status-tag">${statusLabel(a.status)}</span>`:''}
-        ${canBreed ? `<button type="button" class="btn ghost sm" onclick="event.stopPropagation(); editBreedingFromSearch('${a.id}')">Breeding</button>` : ''}
+        <span style="font-size:12px; font-weight:600; white-space:nowrap; color:${pasture?'var(--pasture-dark)':'var(--ink-faint)'};" title="Pasture">📍 ${pasture ? escapeHtml(pasture) : 'No pasture'}</span>
       </div>`;
     }).join('');
   }
   box.style.display = 'block';
-}
-function findBreedingRecordForAnimal(tagId){
-  const recs = state.breeding.filter(b=>b.cowTagId===tagId);
-  if(recs.length===0) return null;
-  const open = recs.find(b=>!b.actualCalvingDate);
-  if(open) return open;
-  return recs.slice().sort((x,y)=>(y.breedingDate||'').localeCompare(x.breedingDate||''))[0];
-}
-function editBreedingFromSearch(animalId){
-  const box = document.getElementById('global-search-results');
-  const input = document.getElementById('global-search-input');
-  if(box){ box.style.display='none'; box.innerHTML=''; }
-  if(input) input.value='';
-  const a = animalById(animalId);
-  if(!a) return;
-  const rec = findBreedingRecordForAnimal(a.tagId);
-  currentTab = 'breeding';
-  render();
-  if(rec) openBreedingModal(rec.id);
-  else openBreedingModal(null, a.tagId);
 }
 function selectGlobalSearchResult(id){
   const box = document.getElementById('global-search-results');
