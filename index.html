@@ -1445,15 +1445,6 @@ function summaryBucketsFor(animals){
   // Age and class keep their natural order; the others list the biggest groups first.
   if(g==='age' || g==='class') list.sort((x,y)=> x.order - y.order);
   else list.sort((x,y)=> x.order - y.order || y.animals.length - x.animals.length || x.label.localeCompare(y.label, undefined, { numeric:true }));
-  // Fill the empty years so the age shape reads honestly.
-  if(g==='age' && list.length){
-    const years = list.filter(b=>b.order<999).map(b=>b.order);
-    if(years.length){
-      const minY = Math.min(...years), maxY = Math.max(...years);
-      for(let y=minY; y<=maxY; y++) if(!list.some(b=>b.order===y)) list.push({ key:String(y), label: y===0 ? 'Under 1 yr' : y===1 ? '1 yr' : (y>=10 ? '10+ yrs' : y+' yrs'), order:y, animals:[] });
-      list.sort((x,y)=> x.order - y.order);
-    }
-  }
   return list;
 }
 function niceMax(v){
