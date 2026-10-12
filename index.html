@@ -568,7 +568,26 @@
   .task-when.ok{ color: var(--turquoise); }
   .bulk-bar{ border-color: var(--brass); }
 
+  /* Herd summary chart */
+  .sum-bar{ fill: var(--rust); transition: fill .12s ease; }
+  .sum-row:hover .sum-bar, .sum-row:focus .sum-bar{ fill: #A9502B; }
+  .sum-row:focus{ outline: none; }
+  .sum-row:focus .sum-label{ text-decoration: underline; }
+  .sum-label{ font: 600 12.5px 'Public Sans', sans-serif; fill: var(--ink); }
+  .sum-value{ font: 700 12px 'JetBrains Mono', monospace; fill: var(--ink-soft); }
+  .sum-tick{ font: 500 10.5px 'JetBrains Mono', monospace; fill: var(--ink-faint); }
+  .sum-grid{ stroke: var(--line-soft); stroke-width: 1; }
+  .sum-tip{ position:absolute; pointer-events:none; background: var(--white); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 6px 10px; z-index: 5; white-space: nowrap; }
+  .sum-tip-value{ font-weight: 700; font-size: 13px; color: var(--ink); }
+  .sum-tip-label{ font-size: 11.5px; color: var(--ink-soft); }
+
   @media (max-width:640px){
+    /* The summary table stays a real 3-column table on phones. */
+    .ledger.sum-table{ display: table; }
+    .ledger.sum-table thead{ display: table-header-group; }
+    .ledger.sum-table tbody{ display: table-row-group; }
+    .ledger.sum-table tr{ display: table-row; padding: 0; }
+    .ledger.sum-table td{ display: table-cell; width: auto; padding: 9px 8px; border-bottom: 1px solid var(--line-soft); }
     .brand h1{ font-size: 21px; }
     .topbar{ padding: 14px 0 20px; }
   }
@@ -1297,6 +1316,7 @@ function render(){
   else if(currentTab==='pastures') root.innerHTML = viewPastures();
   else if(currentTab==='health') root.innerHTML = viewHealth();
   else if(currentTab==='breeding') root.innerHTML = viewBreeding();
+  else if(currentTab==='summary') root.innerHTML = viewSummary();
   if(focusInfo){
     const el = document.getElementById(focusInfo.id);
     if(el){
@@ -1370,6 +1390,183 @@ function openUpcomingGroup(idx){
   document.getElementById('modal-root').innerHTML = modalShell(escapeHtml(g.label), body);
 }
 
+/* =========================================================
+   HERD SUMMARY (opened from the Head total card)
+   One bar chart of head counts, filtered by class/pasture and grouped by age, class,
+   pasture, breed or year letter. Click a bar or table row to see those animals.
+========================================================= */
+let summaryFilters = { klass:'all', pasture:'all', groupBy:'age' };
+let summaryBuckets = [];
+const SUMMARY_CLASS_FILTERS = [
+  ['all','All animals'], ['Cow','Cows'], ['Bred Heifer','Bred heifers'], ['Open Heifer','Open heifers'],
+  ['Heifer','All heifers'], ['Bull','Bulls'], ['Steer','Steers'], ['calves','Calves'],
+];
+const SUMMARY_GROUPS = [['age','Age'], ['class','Class'], ['pasture','Pasture'], ['breed','Breed'], ['yearLetter','Year letter']];
+function summaryAnimals(){
+  return state.animals.filter(a=>{
+    if(!isActive(a)) return false;
+    const k = summaryFilters.klass;
+    if(k==='calves'){ if(a.klass!=='Bull Calf' && a.klass!=='Heifer Calf') return false; }
+    else if(k==='Bred Heifer' || k==='Open Heifer'){ if(classLabel(a)!==k) return false; }
+    else if(k!=='all' && a.klass!==k) return false;
+    if(summaryFilters.pasture!=='all'){
+      const want = summaryFilters.pasture==='__none__' ? '' : summaryFilters.pasture;
+      if((a.pasture||'').trim()!==want) return false;
+    }
+    return true;
+  });
+}
+function ageYears(a){ const d = ageInDays(a.dob); return d===null || d<0 ? null : Math.floor(d/365.25); }
+function summaryBucketsFor(animals){
+  const g = summaryFilters.groupBy;
+  const map = new Map();
+  const put = (key, label, order, a)=>{ if(!map.has(key)) map.set(key, { key, label, order, animals: [] }); map.get(key).animals.push(a); };
+  animals.forEach(a=>{
+    if(g==='age'){
+      const y = ageYears(a);
+      if(y===null) put('none','No birth date', 999, a);
+      else if(y>=10) put('10','10+ yrs', 10, a);
+      else put(String(y), y===0 ? 'Under 1 yr' : y===1 ? '1 yr' : y+' yrs', y, a);
+    } else if(g==='class'){ const c = classLabel(a); put(c, c, CLASSES.indexOf(a.klass)*2 + (c==='Open Heifer'?1:0), a); }
+    else if(g==='pasture'){ const v = (a.pasture||'').trim(); put(v||'none', v||'No pasture', v? 0 : 1, a); }
+    else if(g==='breed'){ const v = (a.breed||'').trim(); put(v||'none', v||'No breed', v? 0 : 1, a); }
+    else if(g==='yearLetter'){ const v = String(a.yearLetter||'').trim().toUpperCase(); put(v||'none', v||'No year letter', v? 0 : 1, a); }
+  });
+  const list = [...map.values()];
+  // Age and class keep their natural order; the others list the biggest groups first.
+  if(g==='age' || g==='class') list.sort((x,y)=> x.order - y.order);
+  else list.sort((x,y)=> x.order - y.order || y.animals.length - x.animals.length || x.label.localeCompare(y.label, undefined, { numeric:true }));
+  // Fill the empty years so the age shape reads honestly.
+  if(g==='age' && list.length){
+    const years = list.filter(b=>b.order<999).map(b=>b.order);
+    if(years.length){
+      const minY = Math.min(...years), maxY = Math.max(...years);
+      for(let y=minY; y<=maxY; y++) if(!list.some(b=>b.order===y)) list.push({ key:String(y), label: y===0 ? 'Under 1 yr' : y===1 ? '1 yr' : (y>=10 ? '10+ yrs' : y+' yrs'), order:y, animals:[] });
+      list.sort((x,y)=> x.order - y.order);
+    }
+  }
+  return list;
+}
+function niceMax(v){
+  if(v<=5) return Math.max(1, v);
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  for(const m of [1, 2, 2.5, 5, 10]) if(m*pow >= v) return m*pow;
+  return 10*pow;
+}
+function summaryChartSvg(buckets){
+  // Drawn at the real on-screen width (no viewBox scaling) so text and bars keep their size on any screen.
+  const root = document.getElementById('view-root');
+  const narrow = window.innerWidth < 640;
+  const W = Math.max(260, Math.floor((root ? root.clientWidth : 640) - (narrow ? 34 : 46)));
+  const rowH = 32, barH = 20, labelW = narrow ? 92 : 128, padR = 36, top = 22;
+  const H = top + buckets.length*rowH + 8;
+  const max = niceMax(Math.max(1, ...buckets.map(b=>b.animals.length)));
+  const plotW = W - labelW - padR;
+  const x = v=> labelW + (v/max)*plotW;
+  // Whole-number ticks only: you can't have half a cow.
+  const step = max<=5 ? 1 : max<=10 ? 2 : max/5;
+  const ticks = []; for(let t=0; t<=max+1e-9; t+=step) ticks.push(Math.round(t));
+  const r = 4;
+  const bar = (b, i)=>{
+    const y = top + i*rowH + (rowH-barH)/2, w = Math.max(0, x(b.animals.length) - labelW);
+    // Square at the baseline, 4px rounded data end.
+    const path = w<=0 ? '' : w<r ? `M${labelW},${y}h${w}v${barH}h${-w}z`
+      : `M${labelW},${y}h${w-r}a${r},${r} 0 0 1 ${r},${r}v${barH-2*r}a${r},${r} 0 0 1 ${-r},${r}h${-(w-r)}z`;
+    return `<g class="sum-row" tabindex="0" role="button" aria-label="${escapeHtml(b.label)}: ${b.animals.length} head"
+        onmousemove="showSummaryTip(event, ${i})" onmouseleave="hideSummaryTip()" onfocus="showSummaryTip(event, ${i})" onblur="hideSummaryTip()"
+        onclick="openSummaryBucket(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); openSummaryBucket(${i});}" style="cursor:pointer;">
+      <rect x="0" y="${top + i*rowH}" width="${W}" height="${rowH}" fill="transparent"></rect>
+      <text x="${labelW-10}" y="${y+barH/2}" text-anchor="end" dominant-baseline="central" class="sum-label">${escapeHtml(b.label)}</text>
+      ${path ? `<path d="${path}" class="sum-bar"></path>` : ''}
+      <text x="${x(b.animals.length)+6}" y="${y+barH/2}" dominant-baseline="central" class="sum-value">${b.animals.length}</text>
+    </g>`;
+  };
+  return `<svg width="${W}" height="${H}" role="img" aria-label="Head count by ${escapeHtml(summaryGroupLabel())}" style="display:block; max-width:100%;">
+    ${ticks.map(t=>`<line x1="${x(t)}" x2="${x(t)}" y1="${top-6}" y2="${H-4}" class="sum-grid"></line><text x="${x(t)}" y="${top-10}" text-anchor="middle" class="sum-tick">${t}</text>`).join('')}
+    ${buckets.map(bar).join('')}
+  </svg>`;
+}
+function summaryGroupLabel(){ return (SUMMARY_GROUPS.find(g=>g[0]===summaryFilters.groupBy)||['','Age'])[1].toLowerCase(); }
+function viewSummary(){
+  const animals = summaryAnimals();
+  const buckets = summaryBucketsFor(animals);
+  summaryBuckets = buckets;
+  const ages = animals.map(ageYears).filter(v=>v!==null);
+  const avg = ages.length ? (animals.map(a=>ageInDays(a.dob)).filter(d=>d!==null && d>=0).reduce((s,d)=>s+d,0) / ages.length / 365.25) : null;
+  const pastures = Object.keys(getPastureGroups()).sort((x,y)=>x.localeCompare(y, undefined, { numeric:true }));
+  const classLbl = (SUMMARY_CLASS_FILTERS.find(c=>c[0]===summaryFilters.klass)||['','All animals'])[1];
+  const sel = (id, opts, cur, onchange)=> `<select id="${id}" onchange="${onchange}">${opts.map(([v,l])=>`<option value="${escapeHtml(v)}" ${v===cur?'selected':''}>${escapeHtml(l)}</option>`).join('')}</select>`;
+  return `
+    <div class="toolbar" style="margin-bottom:6px;">
+      <button class="btn ghost sm" onclick="setTab('dashboard')">← Dashboard</button>
+      <div class="section-title" style="margin:0 0 0 6px;">Herd summary</div>
+    </div>
+    <p class="section-desc">Active head (including Active – Preg). Click a bar or a row to see those animals.</p>
+    <div class="toolbar">
+      <label class="hint" style="margin:0;">Show</label>
+      ${sel('sum-klass', SUMMARY_CLASS_FILTERS, summaryFilters.klass, "summaryFilters.klass=this.value; render();")}
+      <label class="hint" style="margin:0;">in</label>
+      ${sel('sum-pasture', [['all','All pastures'], ...pastures.map(n=>[n,n]), ['__none__','No pasture']], summaryFilters.pasture, "summaryFilters.pasture=this.value; render();")}
+      <label class="hint" style="margin:0;">by</label>
+      ${sel('sum-group', SUMMARY_GROUPS, summaryFilters.groupBy, "summaryFilters.groupBy=this.value; render();")}
+    </div>
+    <div class="grid stat-grid" style="margin-bottom:18px;">
+      <div class="stat-card"><div class="num">${animals.length}</div><div class="label">${escapeHtml(classLbl)}</div></div>
+      <div class="stat-card"><div class="num">${avg===null ? '—' : avg.toFixed(1)}</div><div class="label">Average age (yrs)</div></div>
+      <div class="stat-card"><div class="num">${ages.length ? Math.max(...ages) : '—'}</div><div class="label">Oldest (yrs)</div></div>
+      <div class="stat-card"><div class="num">${animals.length - ages.length}</div><div class="label">No birth date</div></div>
+    </div>
+    <div class="panel" style="position:relative;">
+      <h2>${escapeHtml(classLbl)} by ${escapeHtml(summaryGroupLabel())}</h2>
+      <p class="sub">${animals.length} head${summaryFilters.pasture!=='all' ? ' in '+escapeHtml(summaryFilters.pasture==='__none__' ? 'no pasture' : summaryFilters.pasture) : ''}.</p>
+      ${animals.length===0 ? `<div class="empty-state"><div class="icon">📊</div><h3>No animals match</h3><p>Try a different filter.</p></div>` : summaryChartSvg(buckets)}
+      <div id="summary-tip" class="sum-tip" style="display:none;"><div class="sum-tip-value"></div><div class="sum-tip-label"></div></div>
+    </div>
+    ${animals.length ? `<div class="panel" style="padding:6px 22px 10px;">
+      <table class="ledger sum-table">
+        <thead><tr><th>${escapeHtml(SUMMARY_GROUPS.find(g=>g[0]===summaryFilters.groupBy)[1])}</th><th style="text-align:right;">Head</th><th style="text-align:right;">Share</th></tr></thead>
+        <tbody>${buckets.map((b,i)=>`<tr onclick="openSummaryBucket(${i})"><td>${escapeHtml(b.label)}</td><td class="num-cell" style="text-align:right;">${b.animals.length}</td><td class="num-cell" style="text-align:right;">${Math.round(b.animals.length/animals.length*100)}%</td></tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}`;
+}
+function showSummaryTip(evt, i){
+  const b = summaryBuckets[i], tip = document.getElementById('summary-tip');
+  if(!b || !tip) return;
+  const total = summaryBuckets.reduce((s,x)=>s+x.animals.length, 0);
+  // Labels can be user text (pasture/breed names), so they go in with textContent.
+  tip.querySelector('.sum-tip-value').textContent = `${b.animals.length} head` + (total ? ` · ${Math.round(b.animals.length/total*100)}%` : '');
+  tip.querySelector('.sum-tip-label').textContent = b.label;
+  const panel = tip.parentElement.getBoundingClientRect();
+  const target = evt.currentTarget.getBoundingClientRect();
+  const px = evt.clientX ? evt.clientX : target.left + target.width/2;
+  tip.style.display = 'block';
+  tip.style.left = Math.min(panel.width - tip.offsetWidth - 8, Math.max(8, px - panel.left + 12)) + 'px';
+  tip.style.top = (target.top - panel.top - tip.offsetHeight - 4) + 'px';
+}
+let summaryResizeTimer = null;
+window.addEventListener('resize', ()=>{
+  if(currentTab!=='summary') return;
+  clearTimeout(summaryResizeTimer);
+  summaryResizeTimer = setTimeout(render, 150);
+});
+function hideSummaryTip(){ const tip = document.getElementById('summary-tip'); if(tip) tip.style.display = 'none'; }
+function openSummaryBucket(i){
+  const b = summaryBuckets[i];
+  if(!b) return;
+  if(!b.animals.length){ toast('No animals in this group'); return; }
+  const animals = b.animals.slice().sort(byName);
+  const body = `
+    <p class="hint" style="margin:0 0 14px; font-size:12.5px;">${animals.length} animal${animals.length===1?'':'s'}</p>
+    <div style="border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--white); max-height:420px; overflow-y:auto;">
+      ${animals.map(a=>`<div class="mini-row" style="padding:8px 10px; cursor:pointer;" onclick="closeModal(); openDrawer('${a.id}')">
+        <span>${eartag(a)} <span class="muted" style="font-size:11.5px;">${escapeHtml(classLabel(a))} · ${ageLabel(a.dob)}</span></span>
+        <span class="d">${a.pasture ? '📍 '+escapeHtml(a.pasture) : 'No pasture'}</span>
+      </div>`).join('')}
+    </div>
+    <div class="modal-actions"><button type="button" class="btn rust" onclick="closeModal()">Done</button></div>`;
+  document.getElementById('modal-root').innerHTML = modalShell(escapeHtml(b.label), body);
+}
+
 function taskUrgency(days){
   if(days<0) return 'overdue';
   if(days<=14) return 'due';
@@ -1395,7 +1592,7 @@ function viewDashboard(){
 
   return `
     <div class="grid stat-grid">
-      <div class="stat-card"><div class="num">${active.length}</div><div class="label">Head total</div></div>
+      <div class="stat-card" style="cursor:pointer;" title="Open herd summary" onclick="setTab('summary')"><div class="num">${active.length}</div><div class="label">Head total ›</div></div>
       <div class="stat-card"><div class="num">${cows}</div><div class="label">Cows</div></div>
       <div class="stat-card"><div class="num">${bredHeifers}</div><div class="label">Bred heifers</div></div>
       <div class="stat-card"><div class="num">${calves}</div><div class="label">Calves at side</div></div>
